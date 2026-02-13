@@ -1,0 +1,7 @@
+{
+  "name": "gestion-achats",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "vue-vite"
+}
