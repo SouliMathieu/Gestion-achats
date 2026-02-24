@@ -1,5 +1,6 @@
 {
-  "name": "gestion-achats",
+  "name": "Afriki-achats",
+  "displayName": "Afriki Achats",
   "private": true,
   "version": "0.0.1",
   "type": "module",
@@ -12,14 +13,20 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@capacitor-community/sqlite": "^8.0.0",
+    "@capacitor/android": "8.1.0",
     "@capacitor/app": "8.0.1",
+    "@capacitor/browser": "^8.0.1",
+    "@capacitor/camera": "^8.0.1",
     "@capacitor/core": "8.1.0",
     "@capacitor/haptics": "8.0.0",
+    "@capacitor/ios": "8.1.0",
     "@capacitor/keyboard": "8.0.0",
     "@capacitor/status-bar": "8.0.1",
     "@ionic/vue": "^8.0.0",
     "@ionic/vue-router": "^8.0.0",
     "ionicons": "^7.0.0",
+    "uuid": "^13.0.0",
     "vue": "^3.3.0",
     "vue-router": "^4.2.0"
   },
