@@ -280,7 +280,7 @@
                 label="Notes"
                 label-placement="stacked"
                 v-model="formData.notes"
-                rows="2"
+                :rows="2"
               ></ion-textarea>
             </ion-item>
           </ion-list>

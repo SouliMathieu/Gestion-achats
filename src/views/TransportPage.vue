@@ -14,7 +14,7 @@
           v-model="searchText"
           placeholder="Rechercher une agence..."
           @ionInput="handleSearch"
-          debounce="300"
+          :debounce="300"
         ></ion-searchbar>
       </ion-toolbar>
     </ion-header>
@@ -150,7 +150,7 @@
                 label="Adresse"
                 label-placement="stacked"
                 v-model="formData.adresse"
-                rows="2"
+                :rows="2"
               ></ion-textarea>
             </ion-item>
 
@@ -168,7 +168,7 @@
                 label="Programme (jours et fréquence)"
                 label-placement="stacked"
                 v-model="formData.programme"
-                rows="2"
+                :rows="2"
                 placeholder="Ex: Lundi, Mercredi, Vendredi"
               ></ion-textarea>
             </ion-item>
@@ -196,7 +196,7 @@
                 label="Grille tarifaire"
                 label-placement="stacked"
                 v-model="formData.grilleTarifaire"
-                rows="3"
+                :rows="3"
                 placeholder="Ex: 0-10kg: 50 MAD/kg, 10-50kg: 40 MAD/kg..."
               ></ion-textarea>
             </ion-item>
@@ -206,7 +206,7 @@
                 label="Services complémentaires"
                 label-placement="stacked"
                 v-model="formData.services"
-                rows="2"
+                :rows="2"
                 placeholder="Ex: Assurance, suivi, livraison..."
               ></ion-textarea>
             </ion-item>
@@ -216,7 +216,7 @@
                 label="Notes internes"
                 label-placement="stacked"
                 v-model="formData.notes"
-                rows="2"
+                :rows="2"
               ></ion-textarea>
             </ion-item>
           </ion-list>
@@ -240,7 +240,7 @@ import {
   IonIcon, IonSearchbar, IonList, IonListHeader, IonItem, IonItemSliding,
   IonItemOptions, IonItemOption, IonAvatar, IonLabel, IonFab, IonFabButton,
   IonModal, IonInput, IonTextarea, IonSelect, IonSelectOption, IonRefresher,
-  IonRefresherContent, alertController, toastController
+  IonRefresherContent, alertController, toastController, onIonViewWillEnter
 } from '@ionic/vue';
 import {
   addOutline, createOutline, trashOutline, airplaneOutline

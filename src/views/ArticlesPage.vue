@@ -14,7 +14,7 @@
           v-model="searchText"
           placeholder="Rechercher un article..."
           @ionInput="handleSearch"
-          debounce="300"
+          :debounce="300"
         ></ion-searchbar>
       </ion-toolbar>
       <ion-toolbar>
@@ -127,7 +127,7 @@
                 label="Description"
                 label-placement="stacked"
                 v-model="formData.description"
-                rows="3"
+                :rows="3"
               ></ion-textarea>
             </ion-item>
 
@@ -223,7 +223,7 @@
                 label="Notes internes"
                 label-placement="stacked"
                 v-model="formData.notes"
-                rows="2"
+                :rows="2"
               ></ion-textarea>
             </ion-item>
           </ion-list>
@@ -241,7 +241,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 import { onIonViewWillEnter } from '@ionic/vue';
 import {
   IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonButtons, IonButton,
@@ -258,7 +258,6 @@ import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import DatabaseService from '@/services/database.service';
 import { v4 as uuidv4 } from 'uuid';
 
-const route = useRoute();
 const router = useRouter();
 
 const articles = ref<any[]>([]);
@@ -300,10 +299,10 @@ const filteredArticles = computed(() => {
   return result;
 });
 
-const getFirstPhoto = (photosStr: string) => {
-  if (!photosStr) return null;
+const getFirstPhoto = (photosStr: string): string | undefined => {
+  if (!photosStr) return undefined;
   const photos = photosStr.split(',');
-  return photos[0] || null;
+  return photos[0] || undefined;
 };
 
 const getStatutColor = (statut: string) => {

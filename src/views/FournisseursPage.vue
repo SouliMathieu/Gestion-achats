@@ -14,7 +14,7 @@
           v-model="searchText"
           placeholder="Rechercher un fournisseur..."
           @ionInput="handleSearch"
-          debounce="300"
+          :debounce="300"
         ></ion-searchbar>
       </ion-toolbar>
     </ion-header>
@@ -121,7 +121,7 @@
                 label="Adresse complète"
                 label-placement="stacked"
                 v-model="formData.adresse"
-                rows="2"
+                :rows="2"
               ></ion-textarea>
             </ion-item>
 
@@ -158,7 +158,7 @@
                 label="Articles principaux"
                 label-placement="stacked"
                 v-model="formData.articlesPrincipaux"
-                rows="2"
+                :rows="2"
               ></ion-textarea>
             </ion-item>
 
@@ -167,7 +167,7 @@
                 label="Notes internes"
                 label-placement="stacked"
                 v-model="formData.notes"
-                rows="2"
+                :rows="2"
               ></ion-textarea>
             </ion-item>
           </ion-list>
