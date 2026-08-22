@@ -190,7 +190,7 @@ const loadArticle = async () => {
     // Charger les photos
     const photosStr = article.value.photos;
     if (photosStr) {
-      photos.value = photosStr.split(',').filter((p: string) => p);
+      photos.value = photosStr.split('|||').filter((p: string) => p);
     }
 
     // Charger le fournisseur
