@@ -147,7 +147,7 @@ class DatabaseService {
       const articles = JSON.parse(localStorage.getItem('articles') || '[]');
       articles.push({
         ...article,
-        photos: article.photos?.join(',')
+        photos: article.photos?.join('|||')
       });
       localStorage.setItem('articles', JSON.stringify(articles));
     } else {
@@ -160,7 +160,7 @@ class DatabaseService {
       await this.db.run(query, [
         article.id, article.nom, article.categorie, article.description,
         article.taille, article.couleur, article.prix, article.devise,
-        article.fournisseurId, article.photos?.join(','), article.statut,
+        article.fournisseurId, article.photos?.join('|||'), article.statut,
         article.notes, article.dateCreation, article.dateModification
       ]);
     }
@@ -219,7 +219,7 @@ class DatabaseService {
         articles[index] = {
           ...article,
           id,
-          photos: article.photos?.join(','),
+          photos: article.photos?.join('|||'),
           date_modification: new Date().toISOString()
         };
         localStorage.setItem('articles', JSON.stringify(articles));
@@ -235,7 +235,7 @@ class DatabaseService {
       await this.db.run(query, [
         article.nom, article.categorie, article.description, article.taille,
         article.couleur, article.prix, article.devise, article.fournisseurId,
-        article.photos?.join(','), article.statut, article.notes,
+        article.photos?.join('|||'), article.statut, article.notes,
         new Date().toISOString(), id
       ]);
     }
