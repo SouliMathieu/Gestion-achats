@@ -301,7 +301,7 @@ const filteredArticles = computed(() => {
 
 const getFirstPhoto = (photosStr: string): string | undefined => {
   if (!photosStr) return undefined;
-  const photos = photosStr.split(',');
+  const photos = photosStr.split('|||');
   return photos[0] || undefined;
 };
 
@@ -361,7 +361,7 @@ const editArticle = (article: any) => {
     prix: article.prix,
     devise: article.devise,
     fournisseurId: article.fournisseur_id || '',
-    photos: article.photos ? article.photos.split(',').filter((p: string) => p) : [],
+    photos: article.photos ? article.photos.split('|||').filter((p: string) => p) : [],
     statut: article.statut,
     notes: article.notes || ''
   };
