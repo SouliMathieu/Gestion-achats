@@ -12,7 +12,7 @@
     "test:e2e": "cypress run",
     "test:unit": "vitest",
     "lint": "eslint .",
-    "electron:build": "vite build && electron-builder"
+    "electron:build": "vite build --base=./ && electron-builder"
   },
   "dependencies": {
     "@capacitor-community/sqlite": "^8.0.0",
