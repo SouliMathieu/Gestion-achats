@@ -75,6 +75,9 @@ jobs:
         env:
           CYPRESS_INSTALL_BINARY: 0
 
+      - name: Build web app for Electron
+        run: npx vite build --mode electron --base=./
+
       - name: Build desktop app
         run: npx electron-builder --publish=never
 
