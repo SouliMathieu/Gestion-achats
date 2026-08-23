@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from '@ionic/vue-router';
+import { createRouter, createWebHistory, createWebHashHistory } from '@ionic/vue-router';
 import { RouteRecordRaw } from 'vue-router';
 
 const routes: Array<RouteRecordRaw> = [
@@ -44,8 +44,16 @@ const routes: Array<RouteRecordRaw> = [
   }
 ];
 
+// En Electron, l'app est chargée via file:// : le mode history HTML5 ne
+// fonctionne pas dans ce contexte (pas de vrai "chemin" serveur), donc on
+// bascule sur le mode hash. Sur le web (Netlify, http/https), on garde le
+// mode history classique pour des URLs propres.
+const isFileProtocol = window.location.protocol === 'file:';
+
 const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL),
+  history: isFileProtocol
+    ? createWebHashHistory()
+    : createWebHistory(import.meta.env.BASE_URL),
   routes
 });
 
