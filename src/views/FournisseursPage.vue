@@ -38,10 +38,10 @@
           </ion-item>
 
           <ion-item-options side="end">
-            <ion-item-option color="primary" @click="editFournisseur(fournisseur)">
+            <ion-item-option color="primary" @click="closeSliding($event); editFournisseur(fournisseur)">
               <ion-icon slot="icon-only" :icon="createOutline"></ion-icon>
             </ion-item-option>
-            <ion-item-option color="danger" @click="confirmDelete(fournisseur)">
+            <ion-item-option color="danger" @click="closeSliding($event); confirmDelete(fournisseur)">
               <ion-icon slot="icon-only" :icon="trashOutline"></ion-icon>
             </ion-item-option>
           </ion-item-options>
@@ -243,6 +243,15 @@ const handleSearch = () => {
 const handleRefresh = async (event: any) => {
   await loadFournisseurs();
   event.target.complete();
+};
+
+// Ferme le tiroir de glissement (ion-item-sliding) avant toute action ;
+// sans ça, Ionic laisse l'item dans un état visuel figé après suppression
+// et la liste ne se met pas à jour tant que la page n'est pas rechargée.
+const closeSliding = (event: Event) => {
+  const target = event.target as HTMLElement;
+  const sliding = target.closest('ion-item-sliding') as any;
+  sliding?.close();
 };
 
 const openAddModal = () => {
