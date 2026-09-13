@@ -450,7 +450,7 @@ class DatabaseService {
       localStorage.setItem('commandes', JSON.stringify(commandes));
 
       const allLignes = JSON.parse(localStorage.getItem('commande_lignes') || '[]');
-      allLignes.push(...lignes);
+      allLignes.push(...lignes.map(l => ({ ...l, commande_id: commande.id })));
       localStorage.setItem('commande_lignes', JSON.stringify(allLignes));
     } else {
       if (!this.db) return;
@@ -544,7 +544,7 @@ class DatabaseService {
       if (lignes) {
         const allLignes = JSON.parse(localStorage.getItem('commande_lignes') || '[]');
         const filtered = allLignes.filter((l: any) => l.commande_id !== id);
-        filtered.push(...lignes);
+        filtered.push(...lignes.map(l => ({ ...l, commande_id: id })));
         localStorage.setItem('commande_lignes', JSON.stringify(filtered));
       }
     } else {
