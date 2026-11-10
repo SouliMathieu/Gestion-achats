@@ -49,8 +49,11 @@ describe('Interruption réelle du processus pendant une migration SQLite', () =>
     const db = new DatabaseSync(harness.path(DATABASE_NAME));
     expect(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()).toEqual([]);
     db.close();
-    try { await expect(initializeNativeDatabase(harness.api)).rejects.toMatchObject({code: 'SCHEMA_PARTIAL'}); }
-    finally { harness.close(); }
+    try {
+      await expect(initializeNativeDatabase(harness.api)).rejects.toMatchObject({code: 'EMPTY_DATABASE_CONFIRMATION'});
+      const confirmed = await initializeNativeDatabase(harness.api, true);
+      expect(confirmed.report).toMatchObject({kind: 'empty-existing', version: 1});
+    } finally { harness.close(); }
   });
 });
 

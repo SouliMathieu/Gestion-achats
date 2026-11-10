@@ -92,20 +92,24 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
       expect(directory).toBeTruthy();
     });
 
-  it('initialise une base existante sans aucune table métier', async () => {
+  it('exige une confirmation avant de créer les tables dans une base existante vide', async () => {
     const {service, directory, harness} = setup(0);
     const db = new DatabaseSync(harness.path(DATABASE_NAME));
     db.exec('PRAGMA foreign_keys=OFF; DROP TABLE commande_lignes; DROP TABLE commandes; DROP TABLE articles; DROP TABLE fournisseurs; DROP TABLE transport;');
     db.close();
 
-    const report = await service.initDatabase();
-    expect(report).toMatchObject({kind: 'new', version: 1});
+    const before = readFileSync(harness.path(DATABASE_NAME));
+    await expect(service.initDatabase()).rejects.toMatchObject({code: 'EMPTY_DATABASE_CONFIRMATION'});
+    expect(readFileSync(harness.path(DATABASE_NAME))).toEqual(before);
+    expect(harness.events.some(e => e.name === DATABASE_NAME && e.method === 'execute' && e.sql?.includes('CREATE TABLE'))).toBe(false);
+
+    const report = await service.confirmEmptyDatabaseInitialization();
+    expect(report).toMatchObject({kind: 'empty-existing', version: 1});
     expect(Object.values(report.counts)).toEqual([0, 0, 0, 0, 0]);
     expect(Object.keys(rawSnapshot(directory).data).sort()).toEqual(['articles', 'commande_lignes', 'commandes', 'fournisseurs', 'transport']);
-    expect(harness.events.some(e => e.name === DATABASE_NAME && e.method === 'execute' && e.sql?.includes('CREATE TABLE'))).toBe(true);
   });
 
-  it('complète uniquement les tables manquantes si les tables historiques présentes sont vides', async () => {
+  it.each([0, 1])('demande confirmation puis complète uniquement les tables manquantes d’un schéma vide (version %s)', async version => {
     const {service, directory} = setup(0);
     const db = new DatabaseSync(join(directory, DATABASE_NAME + '.db'));
     db.exec(`
@@ -118,14 +122,36 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
       DROP TABLE commande_lignes;
       DROP TABLE commandes;
       DROP TABLE articles;
+      PRAGMA user_version = ${version};
     `);
     db.close();
 
-    const report = await service.initDatabase();
-    expect(report).toMatchObject({kind: 'new', version: 1});
-    const snapshot = rawSnapshot(directory);
-    expect(Object.keys(snapshot.data).sort()).toEqual(['articles', 'commande_lignes', 'commandes', 'fournisseurs', 'transport']);
-    expect(Object.values(snapshot.data).every(rows => rows.length === 0)).toBe(true);
+    const before = rawSnapshot(directory);
+    await expect(service.initDatabase()).rejects.toMatchObject({code: 'EMPTY_DATABASE_CONFIRMATION'});
+    expect(rawSnapshot(directory)).toEqual(before);
+
+    const report = await service.confirmEmptyDatabaseInitialization();
+    expect(report).toMatchObject({kind: 'partial-empty', version: 1});
+    expect(Object.values(report.counts)).toEqual([0, 0, 0, 0, 0]);
+    expect(Object.keys(rawSnapshot(directory).data).sort()).toEqual(['articles', 'commande_lignes', 'commandes', 'fournisseurs', 'transport']);
+    expect(rawSnapshot(directory).data.transport).toEqual(before.data.transport);
+    expect(rawSnapshot(directory).data.fournisseurs).toEqual(before.data.fournisseurs);
+  });
+
+  it('refuse de compléter un schéma partiel dès qu’une table contient des données', async () => {
+    const {service, directory} = setup(0);
+    const db = new DatabaseSync(join(directory, DATABASE_NAME + '.db'));
+    db.exec(`
+      PRAGMA foreign_keys=OFF;
+      DROP TABLE commande_lignes;
+      DROP TABLE commandes;
+      DROP TABLE articles;
+    `);
+    db.close();
+
+    const before = readFileSync(join(directory, DATABASE_NAME + '.db'));
+    await expect(service.initDatabase()).rejects.toMatchObject({code: 'SCHEMA_PARTIAL'});
+    expect(readFileSync(join(directory, DATABASE_NAME + '.db'))).toEqual(before);
   });
 
   it('reconnaît android_metadata sans perdre ses informations', async () => {

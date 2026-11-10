@@ -11,7 +11,13 @@
             <h1>Vos données sont indisponibles</h1>
             <p>{{ databaseError }}</p>
             <p>Aucune réinitialisation automatique n’est effectuée. Ne désinstallez pas l’application et ne videz pas son stockage.</p>
-            <ion-button @click="reloadApplication">Réessayer l’ouverture</ion-button>
+            <template v-if="databaseNeedsConfirmation">
+              <p>La base existe, mais son schéma est absent ou incomplet et les tables reconnues ne contiennent aucune donnée. Cette opération ajoutera uniquement les tables manquantes ; elle ne supprimera aucune table ni donnée existante.</p>
+              <ion-button :disabled="confirmingDatabase" @click="confirmEmptyDatabase">
+                {{ confirmingDatabase ? 'Initialisation…' : 'Confirmer l’initialisation' }}
+              </ion-button>
+            </template>
+            <ion-button v-else @click="reloadApplication">Réessayer l’ouverture</ion-button>
           </template>
         </div>
       </ion-content>
@@ -58,7 +64,28 @@ import { backupService } from '@/services/backup.service';
 
 const databaseState = ref<'loading' | 'ready' | 'error'>('loading');
 const databaseError = ref('');
+const databaseNeedsConfirmation = ref(false);
+const confirmingDatabase = ref(false);
 const reloadApplication = () => window.location.reload();
+
+const confirmEmptyDatabase = async () => {
+  if (confirmingDatabase.value) return;
+  confirmingDatabase.value = true;
+  databaseError.value = '';
+  try {
+    await DatabaseService.confirmEmptyDatabaseInitialization();
+    databaseNeedsConfirmation.value = false;
+    databaseState.value = 'ready';
+    void backupService.ensureDailySnapshot().catch(error => {
+      console.warn('Sauvegarde automatique locale indisponible :', error);
+    });
+  } catch (error) {
+    databaseError.value = error instanceof Error ? error.message : 'L’initialisation confirmée a échoué.';
+    databaseNeedsConfirmation.value = false;
+  } finally {
+    confirmingDatabase.value = false;
+  }
+};
 
 onMounted(async () => {
   try {
@@ -70,6 +97,8 @@ onMounted(async () => {
     });
   } catch (error) {
     databaseError.value = error instanceof DatabaseInitializationError ? error.message : 'L’ouverture du stockage a échoué.';
+    databaseNeedsConfirmation.value = error instanceof DatabaseInitializationError &&
+      error.code === 'EMPTY_DATABASE_CONFIRMATION';
     databaseState.value = 'error';
   }
 });
