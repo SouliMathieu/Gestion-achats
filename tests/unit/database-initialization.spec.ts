@@ -109,7 +109,7 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
     expect(Object.keys(rawSnapshot(directory).data).sort()).toEqual(['articles', 'commande_lignes', 'commandes', 'fournisseurs', 'transport']);
   });
 
-  it('complète uniquement les tables manquantes si les tables historiques présentes sont vides', async () => {
+  it.each([0, 1])('demande confirmation puis complète uniquement les tables manquantes d’un schéma vide (version %s)', async version => {
     const {service, directory} = setup(0);
     const db = new DatabaseSync(join(directory, DATABASE_NAME + '.db'));
     db.exec(`
@@ -119,6 +119,30 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
       DELETE FROM articles;
       DELETE FROM transport;
       DELETE FROM fournisseurs;
+      DROP TABLE commande_lignes;
+      DROP TABLE commandes;
+      DROP TABLE articles;
+      PRAGMA user_version = ${version};
+    `);
+    db.close();
+
+    const before = rawSnapshot(directory);
+    await expect(service.initDatabase()).rejects.toMatchObject({code: 'EMPTY_DATABASE_CONFIRMATION'});
+    expect(rawSnapshot(directory)).toEqual(before);
+
+    const report = await service.confirmEmptyDatabaseInitialization();
+    expect(report).toMatchObject({kind: 'partial-empty', version: 1});
+    expect(Object.values(report.counts)).toEqual([0, 0, 0, 0, 0]);
+    expect(Object.keys(rawSnapshot(directory).data).sort()).toEqual(['articles', 'commande_lignes', 'commandes', 'fournisseurs', 'transport']);
+    expect(rawSnapshot(directory).data.transport).toEqual(before.data.transport);
+    expect(rawSnapshot(directory).data.fournisseurs).toEqual(before.data.fournisseurs);
+  });
+
+  it('refuse de compléter un schéma partiel dès qu’une table contient des données', async () => {
+    const {service, directory} = setup(0);
+    const db = new DatabaseSync(join(directory, DATABASE_NAME + '.db'));
+    db.exec(`
+      PRAGMA foreign_keys=OFF;
       DROP TABLE commande_lignes;
       DROP TABLE commandes;
       DROP TABLE articles;
