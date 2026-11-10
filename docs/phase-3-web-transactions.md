@@ -17,10 +17,14 @@ Branche : feat/backup-restore-v2.
 - Création d'une commande et de ses lignes.
 - Modification d'une commande avec remplacement éventuel de ses lignes.
 - Suppression d'une commande et de ses lignes.
+- Création SQLite d'une commande et de ses lignes dans une transaction native.
+- Suppression SQLite d'une commande et de ses lignes dans une transaction native.
+- Refus de supprimer un article utilisé par une ligne de commande, un fournisseur référencé par des articles/commandes, ou un transport référencé par une commande.
 
 ## Limites à ce stade
 - localStorage ne fournit pas de transaction native ni de verrou inter-onglets. Le journal protège les interruptions d'écriture et la reprise au redémarrage, mais une concurrence simultanée entre plusieurs onglets doit être traitée séparément.
-- Les opérations SQLite ont leurs transactions natives pour les écritures multi-tables ; les contrôles d'intégrité et suppressions référencées sont traités dans la suite.
+- Les opérations multi-tables SQLite utilisent les transactions natives et annulent l'ensemble si une écriture échoue.
+- Les suppressions référencées sont refusées explicitement côté Web/Electron et SQLite ; aucune suppression en cascade métier n'est appliquée.
 - Ce journal n'est pas une sauvegarde indépendante : il ne protège pas contre la désinstallation, la perte du téléphone ou la suppression du stockage local. Le système Backup & Restore reste indispensable.
 
 ## Tests

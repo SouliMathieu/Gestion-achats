@@ -13,6 +13,23 @@ describe('Initialisation Web/Electron avec données synthétiques', () => {
     expect((await first).kind).toBe('new');
     for (const name of TABLE_NAMES) expect(localStorage.getItem(name)).toBe('[]');
   });
+  it('récupère un journal interrompu avant de rendre les collections accessibles', async () => {
+    localStorage.setItem('commandes', '[]');
+    localStorage.setItem('commande_lignes', '[]');
+    localStorage.setItem('__gestion_achats_transaction_v1__', JSON.stringify({
+      version: 1,
+      writes: [
+        {key: 'commandes', value: '[{"id":"TEST-RECOVERED"}]'},
+        {key: 'commande_lignes', value: '[{"id":"TEST-LINE","commande_id":"TEST-RECOVERED"}]'}
+      ]
+    }));
+
+    const db = service();
+    await db.initDatabase();
+    expect((await db.getCommandes())[0].id).toBe('TEST-RECOVERED');
+    expect(JSON.parse(localStorage.getItem('commande_lignes') || '[]')[0].commande_id).toBe('TEST-RECOVERED');
+    expect(localStorage.getItem('__gestion_achats_transaction_v1__')).toBeNull();
+  });
   it('préserve exactement les anciens JSON et champs historiques', async () => {
     const raw = ' [ {"id":"TEST-1", "dateCreation":"2020-01-01", "historique":{"ancien":true}, "photos":"TEST-photo", "prix":0} ] ';
     for (const name of TABLE_NAMES) localStorage.setItem(name, raw);
