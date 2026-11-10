@@ -12,7 +12,7 @@
             <p>{{ databaseError }}</p>
             <p>Aucune réinitialisation automatique n’est effectuée. Ne désinstallez pas l’application et ne videz pas son stockage.</p>
             <template v-if="databaseNeedsConfirmation">
-              <p>La base existe, mais aucune table applicative n’a été trouvée. Cette opération va uniquement créer les cinq tables nécessaires ; elle ne supprimera aucune table ni donnée existante.</p>
+              <p>La base existe, mais son schéma est absent ou incomplet et les tables reconnues ne contiennent aucune donnée. Cette opération ajoutera uniquement les tables manquantes ; elle ne supprimera aucune table ni donnée existante.</p>
               <ion-button :disabled="confirmingDatabase" @click="confirmEmptyDatabase">
                 {{ confirmingDatabase ? 'Initialisation…' : 'Confirmer l’initialisation' }}
               </ion-button>
