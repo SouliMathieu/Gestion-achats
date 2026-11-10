@@ -83,23 +83,53 @@ const reloadApplication = () => window.location.reload();
 function describeOriginalError(value: unknown, depth = 0): string {
   if (value === null || value === undefined) return '';
   if (depth > 3) return 'Détails supplémentaires indisponibles';
-  if (value instanceof Error) return `${value.name}: ${value.message}`;
-  if (typeof value === 'string') return value;
-  if (typeof value !== 'object') return String(value);
+
+  const safeMessage = (message: string, name = 'Erreur technique'): string => {
+    const normalized = message.trim().replace(/^SQLite(?: error)?\s*:\s*/i, '');
+    const knownSqliteErrors = [
+      /^no such table: [a-zA-Z_][a-zA-Z0-9_]*$/i,
+      /^no such column: [a-zA-Z_][a-zA-Z0-9_]*$/i,
+      /^database is locked$/i,
+      /^attempt to write a readonly database$/i,
+      /^unable to open database file$/i,
+      /^file is not a database$/i,
+      /^database disk image is malformed$/i,
+      /^disk I\/O error$/i,
+      /^database or disk is full$/i,
+      /^foreign key constraint failed$/i,
+      /^unique constraint failed: [a-zA-Z_][a-zA-Z0-9_.]*(?:, [a-zA-Z_][a-zA-Z0-9_.]*)*$/i,
+      /^not null constraint failed: [a-zA-Z_][a-zA-Z0-9_.]*$/i,
+      /^check constraint failed(?: \([a-zA-Z_][a-zA-Z0-9_]*\))?$/i,
+      /^cannot start a transaction within a transaction$/i,
+      /^cannot commit - no transaction is active$/i,
+      /^cannot rollback - no transaction is active$/i,
+      /^sqlite_busy(?:_\w+)?$/i,
+      /^sqlite_locked(?:_\w+)?$/i,
+      /^sqlite_cantopen(?:_\w+)?$/i,
+      /^sqlite_corrupt(?:_\w+)?$/i,
+      /^sqlite_full$/i,
+      /^sqlite_ioerr(?:_\w+)?$/i
+    ];
+    if (knownSqliteErrors.some(pattern => pattern.test(normalized))) {
+      return `SQLite : ${normalized}`;
+    }
+    return `${name} — détail masqué pour protéger les données.`;
+  };
+
+  if (value instanceof Error) return safeMessage(value.message, value.name);
+  if (typeof value === 'string') return safeMessage(value);
+  if (typeof value !== 'object') return 'Erreur technique — détail masqué pour protéger les données.';
+
   const item = value as Record<string, unknown>;
   const parts: string[] = [];
-  for (const key of ['stage', 'message']) {
-    if (typeof item[key] === 'string' && item[key]) parts.push(String(item[key]));
-  }
+  if (typeof item.message === 'string' && item.message) parts.push(safeMessage(item.message));
   for (const key of ['originalError', 'cause', 'error', 'rollbackError']) {
     if (item[key] !== undefined) {
       const detail = describeOriginalError(item[key], depth + 1);
       if (detail && !parts.includes(detail)) parts.push(detail);
     }
   }
-  if (parts.length) return parts.join(' → ').slice(0, 900);
-  try { return JSON.stringify(value).slice(0, 900); }
-  catch { return 'Erreur technique non sérialisable'; }
+  return parts.join(' → ').slice(0, 900);
 }
 
 const confirmEmptyDatabase = async () => {
