@@ -75,6 +75,9 @@
                 <h2>{{ formatDate(snapshot.createdAt) }}</h2>
                 <p>{{ totalRows(snapshot.counts) }} enregistrements · {{ snapshot.sourceStorage }}</p>
               </ion-label>
+              <ion-button slot="end" size="small" fill="outline" :disabled="busy" @click="confirmSnapshotRestore(snapshot.id)">
+                Restaurer
+              </ion-button>
             </ion-item>
           </ion-list>
           <p v-else class="ion-text-center ion-padding">Aucune copie automatique disponible.</p>
@@ -109,7 +112,7 @@ import { backupService, type BackupDocument, type BackupValidation } from '@/ser
 const busy = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 const pending = ref<{doc: BackupDocument; report: BackupValidation} | null>(null);
-const snapshots = ref<BackupValidation[]>([]);
+const snapshots = ref<Array<BackupValidation & {id:string}>>([]);
 const tableLabels = [
   {key:'articles',label:'Articles'},
   {key:'fournisseurs',label:'Fournisseurs'},
@@ -179,6 +182,31 @@ const performRestore = async () => {
     window.location.reload();
   } catch (error) {
     await notify(error instanceof Error ? error.message : 'La restauration a échoué.', 'danger');
+  } finally { busy.value = false; }
+};
+
+const confirmSnapshotRestore = async (id: string) => {
+  const alert = await alertController.create({
+    header: 'Restaurer cette copie ?',
+    message: 'Les données actuelles seront remplacées. Une copie de sécurité sera créée avant la restauration.',
+    buttons: [
+      {text:'Annuler',role:'cancel'},
+      {text:'Restaurer',role:'destructive',handler:()=>{ void performSnapshotRestore(id); }}
+    ]
+  });
+  await alert.present();
+};
+
+const performSnapshotRestore = async (id: string) => {
+  busy.value = true;
+  try {
+    await backupService.restoreAutomaticSnapshot(id);
+    pending.value = null;
+    await loadSnapshots();
+    await notify('Copie automatique restaurée et vérifiée.', 'success');
+    window.location.reload();
+  } catch (error) {
+    await notify(error instanceof Error ? error.message : 'La restauration de la copie a échoué.', 'danger');
   } finally { busy.value = false; }
 };
 

@@ -223,9 +223,16 @@ export class BackupService {
     await this.saveAutomaticSnapshot();
   }
 
-  async listAutomaticSnapshots(): Promise<BackupValidation[]> {
+  async listAutomaticSnapshots(): Promise<Array<BackupValidation & {id:string}>> {
     const items = await snapshotList();
-    return Promise.all(items.map(async item => (await this.validateBackup(item.doc)).report));
+    return Promise.all(items.map(async item => ({id:item.id,...(await this.validateBackup(item.doc)).report})));
+  }
+
+  async restoreAutomaticSnapshot(id: string): Promise<BackupValidation> {
+    const items = await snapshotList();
+    const item = items.find(snapshot => snapshot.id === id);
+    if (!item) throw new Error('Cette copie automatique n’est plus disponible.');
+    return this.restoreBackup(item.doc);
   }
 
   async restoreBackup(input: unknown): Promise<BackupValidation> {
@@ -238,7 +245,8 @@ export class BackupService {
     const after = await this.createBackup();
     const expected = isWeb ? doc.tables : target;
     for (const table of TABLE_NAMES) {
-      if (stable(after.tables[table]) !== stable(expected[table])) {
+      const sortRows = (rows: any[]) => [...rows].sort((a,b)=>stable(a).localeCompare(stable(b)));
+      if (stable(sortRows(after.tables[table])) !== stable(sortRows(expected[table]))) {
         throw new Error('La vérification après restauration a échoué pour ' + table + '. Une copie de sécurité préalable est conservée.');
       }
     }
