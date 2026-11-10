@@ -65,6 +65,25 @@ describe('Sauvegardes JSON — validation et intégrité', () => {
     await expect(service.validateBackup(malformed)).rejects.toThrow('fournisseur absent');
   });
 
+  it('préserve les champs historiques imbriqués dans les sauvegardes Web', async () => {
+    const service = setup();
+    localStorage.setItem('articles', JSON.stringify([{
+      id:'A-1',nom:'Article test',fournisseur_id:'F-1',prix:0,
+      historique:{ancien:true,metadata:{source:'migration'}}, tags:['ancien','conservé']
+    }]));
+    const doc = await service.createBackup();
+    const checked = await service.validateBackup(doc);
+    expect(checked.doc.tables.articles[0].historique).toEqual({ancien:true,metadata:{source:'migration'}});
+    expect(checked.doc.tables.articles[0].tags).toEqual(['ancien','conservé']);
+  });
+
+  it('refuse les identifiants dupliqués avant toute restauration', async () => {
+    const service = setup();
+    const doc = await service.createBackup();
+    doc.tables.articles.push({...doc.tables.articles[0]});
+    await expect(service.validateBackup(doc)).rejects.toThrow('Identifiant dupliqué');
+  });
+
   it('refuse une version de format inconnue', async () => {
     const service = setup();
     const doc = await service.createBackup();

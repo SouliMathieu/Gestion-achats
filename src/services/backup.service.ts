@@ -84,7 +84,11 @@ function validateRows(tables: Record<TableName, any[]>): Record<TableName, any[]
   if (stable(keys) !== stable([...TABLE_NAMES].sort())) throw new Error('La sauvegarde ne contient pas exactement les cinq collections attendues.');
   for (const table of TABLE_NAMES) {
     if (!Array.isArray(tables[table])) throw new Error('Collection invalide : ' + table + '.');
+    const seenIds = new Set<string>();
     for (const [index, row] of tables[table].entries()) {
+      if (typeof row?.id !== 'string' || !row.id.trim()) throw new Error('Identifiant absent ou invalide dans ' + table + ' (' + (index + 1) + ').');
+      if (seenIds.has(row.id)) throw new Error('Identifiant dupliqué dans ' + table + ' : ' + row.id + '.');
+      seenIds.add(row.id);
       if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error('Enregistrement invalide dans ' + table + ' (' + (index + 1) + ').');
       for (const [key, value] of Object.entries(row)) {
         if (value === undefined || typeof value === 'function' || typeof value === 'bigint') throw new Error('Valeur non prise en charge dans ' + table + '.' + key + '.');
