@@ -3,6 +3,7 @@ import { CapacitorSQLite, SQLiteConnection, SQLiteDBConnection } from '@capacito
 
 import { initializeNativeDatabase, type InitializationReport, type NativeConnections } from './database-initialization';
 import { initializeWebStorage } from './database-web-initialization';
+import { normalizeArticle, normalizeFournisseur, normalizeTransport, normalizeCommande, normalizeCommandeLine, mergeWebRecord, buildSqlUpdate, serializePhotos, ARTICLE_ALIASES, FOURNISSEUR_ALIASES, TRANSPORT_ALIASES, COMMANDE_ALIASES } from './database-models';
 
 export class DatabaseService {
   private db: SQLiteDBConnection | null = null;
@@ -31,6 +32,7 @@ export class DatabaseService {
   // ARTICLES
   async createArticle(article: any) {
     await this.initDatabase();
+    article = normalizeArticle(article);
     if (this.isWeb) {
       const articles = JSON.parse(localStorage.getItem('articles') || '[]');
       articles.push({
@@ -73,9 +75,7 @@ export class DatabaseService {
         );
       }
       
-      return articles.sort((a: any, b: any) => 
-        new Date(b.date_modification).getTime() - new Date(a.date_modification).getTime()
-      );
+      return articles.map(normalizeArticle).sort((a: any, b: any) => new Date(b.dateModification || 0).getTime() - new Date(a.dateModification || 0).getTime());
     } else {
       if (!this.db) throw new Error('Connexion SQLite indisponible.');
       let query = 'SELECT * FROM articles WHERE 1=1';
@@ -96,7 +96,7 @@ export class DatabaseService {
 
       query += ' ORDER BY date_modification DESC';
       const result = await this.db.query(query, params);
-      return result.values || [];
+      return (result.values || []).map(normalizeArticle);
     }
   }
 
@@ -137,6 +137,7 @@ export class DatabaseService {
   // FOURNISSEURS
   async createFournisseur(fournisseur: any) {
     await this.initDatabase();
+    fournisseur = normalizeFournisseur(fournisseur);
     if (this.isWeb) {
       const fournisseurs = JSON.parse(localStorage.getItem('fournisseurs') || '[]');
       fournisseurs.push(fournisseur);
@@ -172,7 +173,7 @@ export class DatabaseService {
         );
       }
       
-      return fournisseurs.sort((a: any, b: any) => a.nom.localeCompare(b.nom));
+      return fournisseurs.map(normalizeFournisseur).sort((a: any, b: any) => a.nom.localeCompare(b.nom));
     } else {
       if (!this.db) throw new Error('Connexion SQLite indisponible.');
       let query = 'SELECT * FROM fournisseurs';
@@ -185,7 +186,7 @@ export class DatabaseService {
 
       query += ' ORDER BY nom ASC';
       const result = await this.db.query(query, params);
-      return result.values || [];
+      return (result.values || []).map(normalizeFournisseur);
     }
   }
 
@@ -234,6 +235,7 @@ export class DatabaseService {
   // TRANSPORT (même logique)
   async createTransport(transport: any) {
     await this.initDatabase();
+    transport = normalizeTransport(transport);
     if (this.isWeb) {
       const transports = JSON.parse(localStorage.getItem('transport') || '[]');
       transports.push(transport);
@@ -271,7 +273,7 @@ export class DatabaseService {
         );
       }
       
-      return transports.sort((a: any, b: any) => a.nom.localeCompare(b.nom));
+      return transports.map(normalizeTransport).sort((a: any, b: any) => a.nom.localeCompare(b.nom));
     } else {
       if (!this.db) throw new Error('Connexion SQLite indisponible.');
       let query = 'SELECT * FROM transport';
@@ -284,7 +286,7 @@ export class DatabaseService {
 
       query += ' ORDER BY nom ASC';
       const result = await this.db.query(query, params);
-      return result.values || [];
+      return (result.values || []).map(normalizeTransport);
     }
   }
 
@@ -335,6 +337,8 @@ export class DatabaseService {
   // COMMANDES
   async createCommande(commande: any, lignes: any[]) {
     await this.initDatabase();
+    commande = normalizeCommande(commande);
+    lignes = lignes.map(normalizeCommandeLine);
     if (this.isWeb) {
       const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
       commandes.push(commande);
@@ -376,7 +380,7 @@ export class DatabaseService {
         commandes = commandes.filter((c: any) => c.statut === filters.statut);
       }
       
-      return commandes.sort((a: any, b: any) => 
+      return commandes.map(normalizeCommande).sort((a: any, b: any) => 
         new Date(b.dateCommande).getTime() - new Date(a.dateCommande).getTime()
       );
     } else {
@@ -391,7 +395,7 @@ export class DatabaseService {
 
       query += ' ORDER BY date_commande DESC';
       const result = await this.db.query(query, params);
-      return result.values || [];
+      return (result.values || []).map(normalizeCommande);
     }
   }
 
@@ -406,7 +410,7 @@ export class DatabaseService {
       const allLignes = JSON.parse(localStorage.getItem('commande_lignes') || '[]');
       const lignes = allLignes.filter((l: any) => l.commande_id === id || l.commandeId === id).map(normalizeCommandeLine);
 
-      return { ...commande, lignes };
+      return normalizeCommande({ ...commande, lignes });
     } else {
       if (!this.db) throw new Error('Connexion SQLite indisponible.');
       const commande = await this.db.query('SELECT * FROM commandes WHERE id = ?', [id]);
@@ -415,8 +419,8 @@ export class DatabaseService {
       const lignes = await this.db.query('SELECT * FROM commande_lignes WHERE commande_id = ?', [id]);
 
       return {
-        ...commande.values[0],
-        lignes: lignes.values || []
+        ...normalizeCommande(commande.values[0]),
+        lignes: (lignes.values || []).map(normalizeCommandeLine)
       };
     }
   }
