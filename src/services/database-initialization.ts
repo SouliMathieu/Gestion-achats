@@ -185,8 +185,7 @@ async function baseline(db: SQLiteDBConnection, sqlite: NativeConnections, exist
     }
     await db.commitTransaction();
     active = false;
-    return {storage: 'sqlite', kind: before.kind, version: after.version, counts: after.counts,
-      diagnostics: after.diagnostics, protectionId};
+    return {storage: 'sqlite', kind: before.kind, version: after.version, counts: after.counts, protectionId};
   } catch (error) {
     if (active) {
       try {
