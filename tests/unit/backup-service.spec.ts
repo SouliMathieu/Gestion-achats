@@ -50,7 +50,9 @@ describe('Sauvegardes JSON — validation et intégrité', () => {
   it('refuse une collection manquante ou supplémentaire', async () => {
     const service = setup();
     const doc = await service.createBackup();
-    const missing = {...doc,tables:{...doc.tables,articles:undefined}} as any;
+    const missingTables = {...doc.tables} as any;
+    delete missingTables.articles;
+    const missing = {...doc,tables:missingTables} as any;
     await expect(service.validateBackup(missing)).rejects.toThrow('exactement les cinq collections');
     const extra = {...doc,tables:{...doc.tables,unknown:[]}} as any;
     await expect(service.validateBackup(extra)).rejects.toThrow('exactement les cinq collections');
