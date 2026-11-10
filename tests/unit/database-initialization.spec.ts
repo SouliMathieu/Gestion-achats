@@ -71,11 +71,10 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
     expect(writeIndex).toBeGreaterThan(checkIndex);
   });
 
-  it.each(['missing-table', 'empty-existing', 'extra-column', 'extra-table', 'trigger', 'check-constraint', 'future-version'])('refuse %s avant toute ouverture en écriture, sans modifier le fichier', async variation => {
+  it.each(['missing-table', 'extra-column', 'extra-table', 'trigger', 'check-constraint', 'future-version'])('refuse %s avant toute ouverture en écriture, sans modifier le fichier', async variation => {
       const {service, directory, harness} = setup(variation === 'future-version' ? 9 : 0);
       const db = new DatabaseSync(harness.path(DATABASE_NAME));
       if (variation === 'missing-table') db.exec('PRAGMA foreign_keys=OFF; DROP TABLE commande_lignes;');
-      if (variation === 'empty-existing') for (const t of ['commande_lignes', 'commandes', 'articles', 'fournisseurs', 'transport']) db.exec(`DROP TABLE ${t}`);
       if (variation === 'extra-column') db.exec('ALTER TABLE commandes ADD COLUMN historique TEXT;');
       if (variation === 'extra-table') db.exec('CREATE TABLE inconnu (id TEXT);');
       if (variation === 'trigger') db.exec('CREATE TRIGGER inconnu AFTER INSERT ON articles BEGIN SELECT 1; END;');
@@ -92,6 +91,42 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
       expect(harness.events.some(e => e.name === DATABASE_NAME && !e.readonly)).toBe(false);
       expect(directory).toBeTruthy();
     });
+
+  it('initialise une base existante sans aucune table métier', async () => {
+    const {service, directory, harness} = setup(0);
+    const db = new DatabaseSync(harness.path(DATABASE_NAME));
+    db.exec('PRAGMA foreign_keys=OFF; DROP TABLE commande_lignes; DROP TABLE commandes; DROP TABLE articles; DROP TABLE fournisseurs; DROP TABLE transport;');
+    db.close();
+
+    const report = await service.initDatabase();
+    expect(report).toMatchObject({kind: 'new', version: 1});
+    expect(Object.values(report.counts)).toEqual([0, 0, 0, 0, 0]);
+    expect(Object.keys(rawSnapshot(directory).data).sort()).toEqual(['articles', 'commande_lignes', 'commandes', 'fournisseurs', 'transport']);
+    expect(harness.events.some(e => e.name === DATABASE_NAME && e.method === 'execute' && e.sql?.includes('CREATE TABLE'))).toBe(true);
+  });
+
+  it('complète uniquement les tables manquantes si les tables historiques présentes sont vides', async () => {
+    const {service, directory} = setup(0);
+    const db = new DatabaseSync(join(directory, DATABASE_NAME + '.db'));
+    db.exec(`
+      PRAGMA foreign_keys=OFF;
+      DELETE FROM commande_lignes;
+      DELETE FROM commandes;
+      DELETE FROM articles;
+      DELETE FROM transport;
+      DELETE FROM fournisseurs;
+      DROP TABLE commande_lignes;
+      DROP TABLE commandes;
+      DROP TABLE articles;
+    `);
+    db.close();
+
+    const report = await service.initDatabase();
+    expect(report).toMatchObject({kind: 'new', version: 1});
+    const snapshot = rawSnapshot(directory);
+    expect(Object.keys(snapshot.data).sort()).toEqual(['articles', 'commande_lignes', 'commandes', 'fournisseurs', 'transport']);
+    expect(Object.values(snapshot.data).every(rows => rows.length === 0)).toBe(true);
+  });
 
   it('reconnaît android_metadata sans perdre ses informations', async () => {
     const {service, directory, harness} = setup(0);
