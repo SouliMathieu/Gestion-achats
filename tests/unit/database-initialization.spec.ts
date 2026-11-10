@@ -86,7 +86,11 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
       }
       db.close();
       const bytes = readFileSync(harness.path(DATABASE_NAME));
-      await expect(service.initDatabase()).rejects.toMatchObject({code: expect.stringMatching(/^SCHEMA_/)});
+      if (variation === 'missing-table') {
+        await expect(service.initDatabase()).rejects.toMatchObject({code: 'EMPTY_DATABASE_CONFIRMATION'});
+      } else {
+        await expect(service.initDatabase()).rejects.toMatchObject({code: 'SCHEMA_UNKNOWN'});
+      }
       expect(readFileSync(harness.path(DATABASE_NAME))).toEqual(bytes);
       expect(harness.events.some(e => e.name === DATABASE_NAME && !e.readonly)).toBe(false);
       expect(directory).toBeTruthy();
@@ -138,7 +142,7 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
     expect(rawSnapshot(directory).data.fournisseurs).toEqual(before.data.fournisseurs);
   });
 
-  it('refuse de compléter un schéma partiel dès qu’une table contient des données', async () => {
+  it('complète un schéma partiel avec données après protection et conserve les lignes existantes', async () => {
     const {service, directory} = setup(0);
     const db = new DatabaseSync(join(directory, DATABASE_NAME + '.db'));
     db.exec(`
@@ -149,9 +153,16 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
     `);
     db.close();
 
-    const before = readFileSync(join(directory, DATABASE_NAME + '.db'));
-    await expect(service.initDatabase()).rejects.toMatchObject({code: 'SCHEMA_PARTIAL'});
-    expect(readFileSync(join(directory, DATABASE_NAME + '.db'))).toEqual(before);
+    const before = rawSnapshot(directory);
+    await expect(service.initDatabase()).rejects.toMatchObject({code: 'EMPTY_DATABASE_CONFIRMATION'});
+    expect(rawSnapshot(directory)).toEqual(before);
+    const report = await service.confirmEmptyDatabaseInitialization();
+    expect(report.version).toBe(1);
+    expect(rawSnapshot(directory).data.transport).toEqual(before.data.transport);
+    expect(rawSnapshot(directory).data.fournisseurs).toEqual(before.data.fournisseurs);
+    expect(rawSnapshot(directory).data.articles).toEqual([]);
+    expect(rawSnapshot(directory).data.commandes).toEqual([]);
+    expect(rawSnapshot(directory).data.commande_lignes).toEqual([]);
   });
 
   it('reconnaît android_metadata sans perdre ses informations', async () => {

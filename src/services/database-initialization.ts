@@ -90,19 +90,21 @@ export async function inspectDatabase(db: SQLiteDBConnection, existed: boolean):
 }
 
 function requireKnown(report: Inspection) {
-  if (report.kind === 'partial' || report.kind === 'unknown') {
-    throw new DatabaseInitializationError('SCHEMA_' + report.kind.toUpperCase(),
-      'Le schéma de cette base doit être examiné avant utilisation. Les données sont conservées.', report);
+  // Un schéma partiel mais conforme aux tables connues peut être complété après
+  // protection vérifiée et confirmation explicite. Un schéma inconnu reste bloqué.
+  if (report.kind === 'unknown') {
+    throw new DatabaseInitializationError('SCHEMA_UNKNOWN',
+      'Le schéma de cette base ne correspond pas à une structure reconnue. Aucune modification n’a été effectuée.', report);
   }
 }
 
 function requiresEmptySchemaConfirmation(report: Inspection): boolean {
-  return report.kind === 'empty-existing' || report.kind === 'partial-empty';
+  return report.kind === 'empty-existing' || report.kind === 'partial-empty' || report.kind === 'partial';
 }
 
 function emptySchemaConfirmationError(report: Inspection) {
   return new DatabaseInitializationError('EMPTY_DATABASE_CONFIRMATION',
-    'La base existe, mais son schéma est absent ou incomplet et les tables reconnues ne contiennent aucune donnée. Confirmez l’ajout des tables manquantes. Aucune table ni donnée existante ne sera supprimée.',
+    'La base existe, mais son schéma est absent ou incomplet. Confirmez la création d’une copie de protection et l’ajout des seules tables manquantes. Les tables et données existantes seront conservées.',
     report);
 }
 
@@ -152,25 +154,36 @@ async function baseline(db: SQLiteDBConnection, sqlite: NativeConnections, exist
     }
     let document: string | undefined;
     let protectionId: string | undefined;
-    if (before.kind === 'historical') {
+    if (before.kind === 'historical' || before.kind === 'empty-existing' ||
+      before.kind === 'partial-empty' || before.kind === 'partial') {
       try {
+        // Toute base existante à compléter est sauvegardée et relue avant la moindre modification.
         document = await captureDatabase(db, before);
         protectionId = await persistProtection(sqlite, document);
       } catch (error) {
         throw new DatabaseInitializationError('PROTECTION',
-          'La copie de protection n’a pas pu être vérifiée. Aucune migration n’a été appliquée. Vérifiez l’espace disponible avant de relancer l’application.', before, error);
+          'La copie de protection n’a pas pu être vérifiée. Aucune modification du schéma n’a été effectuée. Les données originales sont conservées.', before, error);
       }
     }
-    if (before.kind === 'new' || before.kind === 'empty-existing' || before.kind === 'partial-empty') {
+    if (before.kind === 'new' || before.kind === 'empty-existing' ||
+      before.kind === 'partial-empty' || before.kind === 'partial') {
+      // CREATE TABLE IF NOT EXISTS ajoute les tables absentes sans modifier les tables existantes.
       for (const sql of Object.values(HISTORICAL_SCHEMA)) await db.execute(sql + ';', false);
     }
     await db.execute(`PRAGMA user_version = ${MIGRATIONS[0].to};`, false);
     const after = await inspectDatabase(db, true);
     if (after.kind !== 'current') throw new Error('Schéma final non conforme.');
     if (document) {
-      // Comparaison intégrale des tables, relations, champs, photos et dates avant COMMIT.
-      const previousVersionView = {...after, version: before.version};
-      if (await captureDatabase(db, previousVersionView) !== document) throw new Error('Différence après migration.');
+      // Comparaison de chaque table et objet déjà présent avant toute création.
+      const original = JSON.parse(document) as {schema: Row[]; data: Record<string, Row[]>};
+      const current = JSON.parse(await captureDatabase(db, {...after, version: before.version})) as {schema: Row[]; data: Record<string, Row[]>};
+      for (const [name, rows] of Object.entries(original.data)) {
+        if (canonical(current.data[name]) !== canonical(rows)) throw new Error(`Données modifiées pendant la complétion : ${name}`);
+      }
+      for (const object of original.schema) {
+        const retained = current.schema.find(item => item.type === object.type && item.name === object.name);
+        if (!retained || canonical(retained) !== canonical(object)) throw new Error(`Structure modifiée pendant la complétion : ${String(object.name)}`);
+      }
     }
     await db.commitTransaction();
     active = false;

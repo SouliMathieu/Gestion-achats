@@ -10,11 +10,19 @@
           <template v-else>
             <h1>Vos données sont indisponibles</h1>
             <p>{{ databaseError }}</p>
+            <section v-if="databaseDiagnostic" class="database-diagnostic">
+              <p><strong>Diagnostic technique</strong></p>
+              <p>Code : {{ databaseDiagnostic.code }}</p>
+              <p v-if="databaseDiagnostic.kind">Schéma détecté : {{ databaseDiagnostic.kind }}</p>
+              <p v-if="databaseDiagnostic.version !== null">Version SQLite : {{ databaseDiagnostic.version }}</p>
+              <p v-if="databaseDiagnostic.counts">Tables et enregistrements : {{ databaseDiagnostic.counts }}</p>
+              <p>Build : {{ buildCommit }}</p>
+            </section>
             <p>Aucune réinitialisation automatique n’est effectuée. Ne désinstallez pas l’application et ne videz pas son stockage.</p>
             <template v-if="databaseNeedsConfirmation">
-              <p>La base existe, mais son schéma est absent ou incomplet et les tables reconnues ne contiennent aucune donnée. Cette opération ajoutera uniquement les tables manquantes ; elle ne supprimera aucune table ni donnée existante.</p>
+              <p>La structure SQLite est incomplète. Une copie de protection sera créée et vérifiée avant l’ajout des tables manquantes. Les tables et enregistrements existants seront contrôlés avant validation. En cas d’échec, la transaction sera annulée.</p>
               <ion-button :disabled="confirmingDatabase" @click="confirmEmptyDatabase">
-                {{ confirmingDatabase ? 'Initialisation…' : 'Confirmer l’initialisation' }}
+                {{ confirmingDatabase ? 'Protection et réparation…' : 'Protéger et compléter la base' }}
               </ion-button>
             </template>
             <ion-button v-else @click="reloadApplication">Réessayer l’ouverture</ion-button>
@@ -64,6 +72,8 @@ import { backupService } from '@/services/backup.service';
 
 const databaseState = ref<'loading' | 'ready' | 'error'>('loading');
 const databaseError = ref('');
+const databaseDiagnostic = ref<{code: string; kind?: string; version: number | null; counts?: string} | null>(null);
+const buildCommit = import.meta.env.VITE_BUILD_COMMIT || 'non renseigné';
 const databaseNeedsConfirmation = ref(false);
 const confirmingDatabase = ref(false);
 const reloadApplication = () => window.location.reload();
@@ -81,7 +91,8 @@ const confirmEmptyDatabase = async () => {
     });
   } catch (error) {
     databaseError.value = error instanceof Error ? error.message : 'L’initialisation confirmée a échoué.';
-    databaseNeedsConfirmation.value = false;
+    databaseNeedsConfirmation.value = error instanceof DatabaseInitializationError &&
+      (error.code === 'EMPTY_DATABASE_CONFIRMATION' || error.code === 'SCHEMA_COMPLETION_CONFIRMATION');
   } finally {
     confirmingDatabase.value = false;
   }
@@ -97,8 +108,19 @@ onMounted(async () => {
     });
   } catch (error) {
     databaseError.value = error instanceof DatabaseInitializationError ? error.message : 'L’ouverture du stockage a échoué.';
+    if (error instanceof DatabaseInitializationError) {
+      const report = error.report;
+      databaseDiagnostic.value = {
+        code: error.code,
+        kind: report?.kind,
+        version: report?.version ?? null,
+        counts: report ? JSON.stringify(report.counts) : undefined
+      };
+    } else {
+      databaseDiagnostic.value = {code: 'UNEXPECTED', version: null};
+    }
     databaseNeedsConfirmation.value = error instanceof DatabaseInitializationError &&
-      error.code === 'EMPTY_DATABASE_CONFIRMATION';
+      (error.code === 'EMPTY_DATABASE_CONFIRMATION' || error.code === 'SCHEMA_COMPLETION_CONFIRMATION');
     databaseState.value = 'error';
   }
 });
@@ -107,7 +129,16 @@ onMounted(async () => {
 <style>
 .database-state {
   max-width: 40rem;
-  margin: 12vh auto;
+  margin: 8vh auto;
+}
+
+.database-diagnostic {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--ion-color-step-300);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
 }
 
 :root {
