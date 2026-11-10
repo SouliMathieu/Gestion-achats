@@ -36,6 +36,12 @@ jobs:
         env:
           CYPRESS_INSTALL_BINARY: 0
 
+      - name: TypeScript validation
+        run: npx vue-tsc --noEmit
+
+      - name: Unit tests
+        run: npm run test:unit -- --run --threads=false
+
       - name: Build web app
         run: npx vite build
 
