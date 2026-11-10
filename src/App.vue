@@ -13,6 +13,8 @@
             <section v-if="databaseDiagnostic" class="database-diagnostic">
               <p><strong>Diagnostic technique</strong></p>
               <p>Code : {{ databaseDiagnostic.code }}</p>
+              <p v-if="databaseDiagnostic.stage">Étape : {{ databaseDiagnostic.stage }}</p>
+              <p v-if="databaseDiagnostic.cause">Cause : {{ databaseDiagnostic.cause }}</p>
               <p v-if="databaseDiagnostic.kind">Schéma détecté : {{ databaseDiagnostic.kind }}</p>
               <p v-if="databaseDiagnostic.version !== null">Version SQLite : {{ databaseDiagnostic.version }}</p>
               <p v-if="databaseDiagnostic.counts">Tables et enregistrements : {{ databaseDiagnostic.counts }}</p>
@@ -72,11 +74,33 @@ import { backupService } from '@/services/backup.service';
 
 const databaseState = ref<'loading' | 'ready' | 'error'>('loading');
 const databaseError = ref('');
-const databaseDiagnostic = ref<{code: string; kind?: string; version: number | null; counts?: string} | null>(null);
+const databaseDiagnostic = ref<{code: string; stage?: string; cause?: string; kind?: string; version: number | null; counts?: string} | null>(null);
 const buildCommit = import.meta.env.VITE_BUILD_COMMIT || 'non renseigné';
 const databaseNeedsConfirmation = ref(false);
 const confirmingDatabase = ref(false);
 const reloadApplication = () => window.location.reload();
+
+function describeOriginalError(value: unknown, depth = 0): string {
+  if (value === null || value === undefined) return '';
+  if (depth > 3) return 'Détails supplémentaires indisponibles';
+  if (value instanceof Error) return `${value.name}: ${value.message}`;
+  if (typeof value === 'string') return value;
+  if (typeof value !== 'object') return String(value);
+  const item = value as Record<string, unknown>;
+  const parts: string[] = [];
+  for (const key of ['stage', 'message']) {
+    if (typeof item[key] === 'string' && item[key]) parts.push(String(item[key]));
+  }
+  for (const key of ['originalError', 'cause', 'error', 'rollbackError']) {
+    if (item[key] !== undefined) {
+      const detail = describeOriginalError(item[key], depth + 1);
+      if (detail && !parts.includes(detail)) parts.push(detail);
+    }
+  }
+  if (parts.length) return parts.join(' → ').slice(0, 900);
+  try { return JSON.stringify(value).slice(0, 900); }
+  catch { return 'Erreur technique non sérialisable'; }
+}
 
 const confirmEmptyDatabase = async () => {
   if (confirmingDatabase.value) return;
@@ -112,6 +136,10 @@ onMounted(async () => {
       const report = error.report;
       databaseDiagnostic.value = {
         code: error.code,
+        stage: error.originalError && typeof error.originalError === 'object' &&
+          typeof (error.originalError as Record<string, unknown>).stage === 'string'
+          ? String((error.originalError as Record<string, unknown>).stage) : undefined,
+        cause: describeOriginalError(error.originalError),
         kind: report?.kind,
         version: report?.version ?? null,
         counts: report ? JSON.stringify(report.counts) : undefined
