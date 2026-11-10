@@ -90,9 +90,11 @@ export async function inspectDatabase(db: SQLiteDBConnection, existed: boolean):
 }
 
 function requireKnown(report: Inspection) {
-  if (report.kind === 'partial' || report.kind === 'unknown') {
-    throw new DatabaseInitializationError('SCHEMA_' + report.kind.toUpperCase(),
-      'Le schéma de cette base doit être examiné avant utilisation. Les données sont conservées.', report);
+  // Un schéma partiel mais conforme aux tables connues peut être complété après
+  // protection vérifiée et confirmation explicite. Un schéma inconnu reste bloqué.
+  if (report.kind === 'unknown') {
+    throw new DatabaseInitializationError('SCHEMA_UNKNOWN',
+      'Le schéma de cette base ne correspond pas à une structure reconnue. Aucune modification n’a été effectuée.', report);
   }
 }
 
@@ -102,7 +104,7 @@ function requiresEmptySchemaConfirmation(report: Inspection): boolean {
 
 function emptySchemaConfirmationError(report: Inspection) {
   return new DatabaseInitializationError('EMPTY_DATABASE_CONFIRMATION',
-    'La base existe, mais son schéma est absent ou incomplet et les tables reconnues ne contiennent aucune donnée. Confirmez l’ajout des tables manquantes. Aucune table ni donnée existante ne sera supprimée.',
+    'La base existe, mais son schéma est absent ou incomplet. Confirmez la création d’une copie de protection et l’ajout des seules tables manquantes. Les tables et données existantes seront conservées.',
     report);
 }
 
