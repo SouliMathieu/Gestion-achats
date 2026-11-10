@@ -10,6 +10,7 @@
           <template v-else>
             <h1>Vos données sont indisponibles</h1>
             <p>{{ databaseError }}</p>
+            <p>Aucune réinitialisation automatique n’est effectuée. Ne désinstallez pas l’application et ne videz pas son stockage.</p>
             <template v-if="databaseNeedsConfirmation">
               <p>La base existe, mais aucune table applicative n’a été trouvée. Cette opération va uniquement créer les cinq tables nécessaires ; elle ne supprimera aucune table ni donnée existante.</p>
               <ion-button :disabled="confirmingDatabase" @click="confirmEmptyDatabase">
