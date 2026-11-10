@@ -126,16 +126,22 @@ export class DatabaseService {
   async deleteArticle(id: string) {
     await this.initDatabase();
     if (this.isWeb) {
+      const lines = JSON.parse(localStorage.getItem('commande_lignes') || '[]');
+      if (lines.some((line: any) => (line.article_id ?? line.articleId) === id)) {
+        throw new Error('Suppression refusée : cet article est utilisé dans au moins une commande.');
+      }
       const articles = JSON.parse(localStorage.getItem('articles') || '[]');
-      const filtered = articles.filter((a: any) => a.id !== id);
-      localStorage.setItem('articles', JSON.stringify(filtered));
+      localStorage.setItem('articles', JSON.stringify(articles.filter((a: any) => a.id !== id)));
     } else {
       if (!this.db) throw new Error('Connexion SQLite indisponible.');
+      const refs = await this.db.query('SELECT COUNT(*) AS count FROM commande_lignes WHERE article_id = ?', [id]);
+      if (Number(refs.values?.[0]?.count ?? 0) > 0) {
+        throw new Error('Suppression refusée : cet article est utilisé dans au moins une commande.');
+      }
       await this.db.run('DELETE FROM articles WHERE id = ?', [id]);
     }
   }
 
-  // FOURNISSEURS
   async createFournisseur(fournisseur: any) {
     await this.initDatabase();
     fournisseur = normalizeFournisseur(fournisseur);
@@ -216,16 +222,27 @@ export class DatabaseService {
   async deleteFournisseur(id: string) {
     await this.initDatabase();
     if (this.isWeb) {
+      const articles = JSON.parse(localStorage.getItem('articles') || '[]');
+      const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
+      if (articles.some((a: any) => (a.fournisseur_id ?? a.fournisseurId) === id) ||
+        commandes.some((c: any) => (c.fournisseur_id ?? c.fournisseurId) === id)) {
+        throw new Error('Suppression refusée : ce fournisseur est associé à des articles ou à des commandes.');
+      }
       const fournisseurs = JSON.parse(localStorage.getItem('fournisseurs') || '[]');
-      const filtered = fournisseurs.filter((f: any) => f.id !== id);
-      localStorage.setItem('fournisseurs', JSON.stringify(filtered));
+      localStorage.setItem('fournisseurs', JSON.stringify(fournisseurs.filter((f: any) => f.id !== id)));
     } else {
       if (!this.db) throw new Error('Connexion SQLite indisponible.');
+      const [articles, commandes] = await Promise.all([
+        this.db.query('SELECT COUNT(*) AS count FROM articles WHERE fournisseur_id = ?', [id]),
+        this.db.query('SELECT COUNT(*) AS count FROM commandes WHERE fournisseur_id = ?', [id])
+      ]);
+      if (Number(articles.values?.[0]?.count ?? 0) > 0 || Number(commandes.values?.[0]?.count ?? 0) > 0) {
+        throw new Error('Suppression refusée : ce fournisseur est associé à des articles ou à des commandes.');
+      }
       await this.db.run('DELETE FROM fournisseurs WHERE id = ?', [id]);
     }
   }
 
-  // TRANSPORT (même logique)
   async createTransport(transport: any) {
     await this.initDatabase();
     transport = normalizeTransport(transport);
@@ -310,16 +327,22 @@ export class DatabaseService {
   async deleteTransport(id: string) {
     await this.initDatabase();
     if (this.isWeb) {
+      const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
+      if (commandes.some((c: any) => (c.transport_id ?? c.transportId) === id)) {
+        throw new Error('Suppression refusée : ce transport est associé à une commande.');
+      }
       const transports = JSON.parse(localStorage.getItem('transport') || '[]');
-      const filtered = transports.filter((t: any) => t.id !== id);
-      localStorage.setItem('transport', JSON.stringify(filtered));
+      localStorage.setItem('transport', JSON.stringify(transports.filter((t: any) => t.id !== id)));
     } else {
       if (!this.db) throw new Error('Connexion SQLite indisponible.');
+      const refs = await this.db.query('SELECT COUNT(*) AS count FROM commandes WHERE transport_id = ?', [id]);
+      if (Number(refs.values?.[0]?.count ?? 0) > 0) {
+        throw new Error('Suppression refusée : ce transport est associé à une commande.');
+      }
       await this.db.run('DELETE FROM transport WHERE id = ?', [id]);
     }
   }
 
-  // COMMANDES
   async createCommande(commande: any, lignes: any[]) {
     await this.initDatabase();
     commande = normalizeCommande(commande);
