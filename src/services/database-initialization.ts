@@ -77,6 +77,7 @@ export async function inspectDatabase(db: SQLiteDBConnection, existed: boolean):
   let kind: SchemaKind;
   if (version > SCHEMA_VERSION || unsupported || !matches) kind = 'unknown';
   else if (tables.length === TABLE_NAMES.length) kind = version === 0 ? 'historical' : 'current';
+  else if (!existed && tables.length === 0) kind = 'new';
   else if (tables.length === 0 && version === 0) {
     // Une base présente mais dépourvue de tables applicatives peut être le résultat
     // d'une création interrompue : elle exige une confirmation explicite.
