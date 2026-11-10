@@ -54,6 +54,7 @@ import { pieChartOutline, cubeOutline, storefrontOutline, airplaneOutline, cartO
 import { onMounted, ref } from 'vue';
 import DatabaseService from '@/services/database.service';
 import { DatabaseInitializationError } from '@/services/database-initialization';
+import { backupService } from '@/services/backup.service';
 
 const databaseState = ref<'loading' | 'ready' | 'error'>('loading');
 const databaseError = ref('');
@@ -63,6 +64,10 @@ onMounted(async () => {
   try {
     await DatabaseService.initDatabase();
     databaseState.value = 'ready';
+    // Une seule copie automatique par jour ; son échec ne bloque jamais l'accès aux données.
+    void backupService.ensureDailySnapshot().catch(error => {
+      console.warn('Sauvegarde automatique locale indisponible :', error);
+    });
   } catch (error) {
     databaseError.value = error instanceof DatabaseInitializationError ? error.message : 'L’ouverture du stockage a échoué.';
     databaseState.value = 'error';

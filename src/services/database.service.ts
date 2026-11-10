@@ -5,6 +5,7 @@ import { initializeNativeDatabase, type InitializationReport, type NativeConnect
 import { initializeWebStorage } from './database-web-initialization';
 import { normalizeArticle, normalizeFournisseur, normalizeTransport, normalizeCommande, normalizeCommandeLine, mergeWebRecord, buildSqlUpdate, serializePhotos, ARTICLE_ALIASES, FOURNISSEUR_ALIASES, TRANSPORT_ALIASES, COMMANDE_ALIASES } from './database-models';
 import { writeWebTransaction } from './database-web-transaction';
+import { TABLE_NAMES, type TableName } from './database-schema';
 
 export class DatabaseService {
   private db: SQLiteDBConnection | null = null;
@@ -506,6 +507,101 @@ export class DatabaseService {
       if (!this.db) throw new Error('Connexion SQLite indisponible.');
       await this.db.run('DELETE FROM commande_lignes WHERE commande_id = ?', [id]);
       await this.db.run('DELETE FROM commandes WHERE id = ?', [id]);
+    }
+  }
+
+  /**
+   * Export brut des cinq collections, sans normalisation métier.
+   * Les alias et champs historiques Web sont volontairement conservés.
+   */
+  async exportBackupTables(): Promise<{storage: 'sqlite' | 'localStorage'; tables: Record<TableName, any[]>}> {
+    await this.initDatabase();
+    const tables = {} as Record<TableName, any[]>;
+    if (this.isWeb) {
+      for (const name of TABLE_NAMES) {
+        const raw = localStorage.getItem(name);
+        if (raw === null) throw new Error(`Collection locale absente : ${name}.`);
+        const rows = JSON.parse(raw);
+        if (!Array.isArray(rows)) throw new Error(`Collection locale invalide : ${name}.`);
+        tables[name] = rows;
+      }
+      return {storage: 'localStorage', tables};
+    }
+
+    if (!this.db) throw new Error('Connexion SQLite indisponible.');
+    for (const name of TABLE_NAMES) {
+      const result = await this.db.query(`SELECT * FROM "${name}";`);
+      if (!Array.isArray(result.values)) throw new Error(`Lecture SQLite impossible : ${name}.`);
+      tables[name] = result.values;
+    }
+    const foreignKeys = await this.db.query('PRAGMA foreign_key_check;');
+    if (!Array.isArray(foreignKeys.values) || foreignKeys.values.length !== 0) {
+      throw new Error('La base contient des relations incohérentes. Corrigez-les avant de créer une sauvegarde.');
+    }
+    const integrity = await this.db.query('PRAGMA quick_check;');
+    if (integrity.values?.length !== 1 || Object.values(integrity.values[0] ?? {})[0] !== 'ok') {
+      throw new Error('Le contrôle d’intégrité SQLite a échoué. Aucune sauvegarde n’a été déclarée valide.');
+    }
+    return {storage: 'sqlite', tables};
+  }
+
+  /**
+   * Remplace les cinq collections en une seule opération transactionnelle.
+   * Les données doivent déjà avoir été contrôlées et adaptées au schéma SQLite.
+   */
+  async replaceBackupTables(tables: Record<TableName, any[]>): Promise<void> {
+    await this.initDatabase();
+    for (const name of TABLE_NAMES) {
+      if (!Array.isArray(tables[name])) throw new Error(`Données de restauration invalides : ${name}.`);
+    }
+
+    if (this.isWeb) {
+      writeWebTransaction(localStorage, TABLE_NAMES.map(name => ({
+        key: name,
+        value: JSON.stringify(tables[name])
+      })));
+      return;
+    }
+
+    if (!this.db) throw new Error('Connexion SQLite indisponible.');
+    const deleteOrder: TableName[] = ['commande_lignes', 'commandes', 'articles', 'transport', 'fournisseurs'];
+    const insertOrder: TableName[] = ['fournisseurs', 'transport', 'articles', 'commandes', 'commande_lignes'];
+    const quote = (identifier: string) => '"' + identifier.replace(/"/g, '""') + '"';
+
+    await this.db.beginTransaction();
+    try {
+      for (const name of deleteOrder) {
+        await this.db.run(`DELETE FROM "${name}";`, [], false);
+      }
+
+      for (const name of insertOrder) {
+        for (const row of tables[name]) {
+          const columns = Object.keys(row);
+          if (columns.length === 0 || columns.some(column => !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(column))) {
+            throw new Error(`Colonnes de restauration invalides dans ${name}.`);
+          }
+          const sql = `INSERT INTO "${name}" (${columns.map(quote).join(',')}) VALUES (${columns.map(() => '?').join(',')});`;
+          await this.db.run(sql, columns.map(column => row[column]), false);
+        }
+      }
+
+      const foreignKeys = await this.db.query('PRAGMA foreign_key_check;');
+      if (!Array.isArray(foreignKeys.values) || foreignKeys.values.length !== 0) {
+        throw new Error('La sauvegarde contient des relations incohérentes. La restauration a été annulée.');
+      }
+      const integrity = await this.db.query('PRAGMA quick_check;');
+      if (integrity.values?.length !== 1 || Object.values(integrity.values[0] ?? {})[0] !== 'ok') {
+        throw new Error('Le contrôle d’intégrité SQLite a échoué. La restauration a été annulée.');
+      }
+      await this.db.commitTransaction();
+    } catch (error) {
+      try {
+        const active = await this.db.isTransactionActive();
+        if (active.result === true) await this.db.rollbackTransaction();
+      } catch (rollbackError) {
+        throw new Error('La restauration a échoué et le retour arrière doit être vérifié.', {cause: {error, rollbackError}});
+      }
+      throw error;
     }
   }
 
