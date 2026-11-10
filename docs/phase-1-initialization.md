@@ -28,10 +28,10 @@ L'inspection contrôle `quick_check`, la version, `sqlite_master`, les colonnes,
 
 | État | Décision |
 | --- | --- |
-| Fichier absent, aucune table applicative, version 0 | Création transactionnelle des cinq tables historiques et version 1 |
+| Fichier absent ou base sans table métier, version 0 ou 1 | Création transactionnelle des cinq tables historiques et version 1 |
 | Schéma historique complet, version 0 | Protection indépendante vérifiée, puis reconnaissance en version 1 |
 | Schéma historique complet, version 1 | Lecture normale, aucune migration ni protection supplémentaire |
-| Fichier déjà existant mais vide, ou tables manquantes | Blocage `SCHEMA_PARTIAL`, sans réparation automatique |
+| Sous-ensemble exact des tables historiques, toutes vides, version 0 ou 1 | Création additive des tables manquantes ; aucune table existante n’est supprimée ou remplacée |\n| Tables manquantes avec au moins une ligne métier | Blocage `SCHEMA_PARTIAL`, sans réparation automatique |
 | Colonnes, contraintes, tables ou déclencheurs inconnus ; version supérieure à 1 | Blocage `SCHEMA_UNKNOWN`, sans modification |
 | Base illisible ou contrôle d'intégrité en échec | Erreur explicite, sans nouvelle base de remplacement |
 
