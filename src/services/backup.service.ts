@@ -69,7 +69,11 @@ function adaptRowsForSqlite(tables: Record<TableName, any[]>): Record<TableName,
       for (const [key, value] of Object.entries(row)) {
         const column = aliases[table]?.[key] ?? key;
         if (!allowed.has(column)) throw new Error('Champ non compatible avec SQLite : ' + table + '.' + key + '. Aucune donnée ne sera ignorée.');
-        if (Object.prototype.hasOwnProperty.call(output, column)) throw new Error('Deux champs correspondent à la même colonne dans ' + table + '.');
+        if (value !== null && typeof value === 'object') throw new Error('Valeur imbriquée incompatible avec SQLite : ' + table + '.' + key + '.');
+        if (Object.prototype.hasOwnProperty.call(output, column)) {
+          if (stable(output[column]) !== stable(value)) throw new Error('Deux champs contradictoires correspondent à la même colonne dans ' + table + '.');
+          continue;
+        }
         output[column] = value;
       }
       return output;
@@ -92,14 +96,26 @@ function validateRows(tables: Record<TableName, any[]>): Record<TableName, any[]
       if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error('Enregistrement invalide dans ' + table + ' (' + (index + 1) + ').');
       for (const [key, value] of Object.entries(row)) {
         if (value === undefined || typeof value === 'function' || typeof value === 'bigint') throw new Error('Valeur non prise en charge dans ' + table + '.' + key + '.');
-        if (value !== null && typeof value === 'object') throw new Error('Valeur imbriquée non prise en charge dans ' + table + '.' + key + '.');
-        if (typeof value === 'number' && !Number.isFinite(value)) throw new Error('Nombre invalide dans ' + table + '.' + key + '.');
+        const validateJsonValue = (item: any, path: string): void => {
+          if (item === null || typeof item === 'string' || typeof item === 'boolean') return;
+          if (typeof item === 'number' && Number.isFinite(item)) return;
+          if (Array.isArray(item)) {
+            item.forEach((child, i) => validateJsonValue(child, path + '[' + i + ']'));
+            return;
+          }
+          if (typeof item === 'object' && Object.getPrototypeOf(item) === Object.prototype) {
+            for (const [childKey, child] of Object.entries(item)) validateJsonValue(child, path + '.' + childKey);
+            return;
+          }
+          throw new Error('Valeur JSON non prise en charge dans ' + path + '.');
+        };
+        validateJsonValue(value, table + '.' + key);
       }
     }
   }
   const ids = (table: TableName) => new Set(tables[table].map(row => row.id));
   const suppliers = ids('fournisseurs'), transports = ids('transport'), articles = ids('articles'), orders = ids('commandes');
-  const has = (row: any, a: string, b: string) => row[a] ?? row[b] ?? null;
+  const has = (row: any, a: string, b: string) => Object.prototype.hasOwnProperty.call(row, a) ? row[a] : row[b] ?? null;
   for (const row of tables.articles) {
     const supplier = has(row,'fournisseur_id','fournisseurId');
     if (supplier && !suppliers.has(supplier)) throw new Error('Un article référence un fournisseur absent.');
