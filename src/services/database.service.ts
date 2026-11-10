@@ -1,148 +1,36 @@
 import { Capacitor } from '@capacitor/core';
 import { CapacitorSQLite, SQLiteConnection, SQLiteDBConnection } from '@capacitor-community/sqlite';
 
-class DatabaseService {
+import { initializeNativeDatabase, type InitializationReport, type NativeConnections } from './database-initialization';
+import { initializeWebStorage } from './database-web-initialization';
+
+export class DatabaseService {
   private db: SQLiteDBConnection | null = null;
-  private sqlite: SQLiteConnection;
+  private sqlite: NativeConnections;
   private isWeb: boolean;
+  private initialization: Promise<InitializationReport> | null = null;
 
-  constructor() {
-    this.sqlite = new SQLiteConnection(CapacitorSQLite);
-    this.isWeb = Capacitor.getPlatform() === 'web';
+  constructor(options?: { sqlite?: NativeConnections; platform?: string }) {
+    this.sqlite = options?.sqlite ?? new SQLiteConnection(CapacitorSQLite);
+    this.isWeb = (options?.platform ?? Capacitor.getPlatform()) === 'web';
   }
 
-  async initDatabase() {
-    try {
-      if (this.isWeb) {
-        console.log('Mode WEB : Utilisation de localStorage');
-        this.initWebStorage();
-      } else {
-        console.log('Mode NATIF : Utilisation de SQLite');
-        this.db = await this.sqlite.createConnection(
-          'gestion_achats',
-          false,
-          'no-encryption',
-          1,
-          false
-        );
-        await this.db.open();
-        await this.createTables();
-      }
-      console.log('Base de données initialisée');
-    } catch (error) {
-      console.error('Erreur initialisation DB:', error);
+  // Un échec reste mémorisé : aucun nouvel essai ni recréation implicite.
+  initDatabase(): Promise<InitializationReport> {
+    if (!this.initialization) {
+      this.initialization = Promise.resolve().then(async () => {
+        if (this.isWeb) return initializeWebStorage(localStorage);
+        const initialized = await initializeNativeDatabase(this.sqlite);
+        this.db = initialized.db;
+        return initialized.report;
+      });
     }
-  }
-
-  private initWebStorage() {
-    // Initialiser les collections dans localStorage si elles n'existent pas
-    if (!localStorage.getItem('articles')) localStorage.setItem('articles', JSON.stringify([]));
-    if (!localStorage.getItem('fournisseurs')) localStorage.setItem('fournisseurs', JSON.stringify([]));
-    if (!localStorage.getItem('transport')) localStorage.setItem('transport', JSON.stringify([]));
-    if (!localStorage.getItem('commandes')) localStorage.setItem('commandes', JSON.stringify([]));
-    if (!localStorage.getItem('commande_lignes')) localStorage.setItem('commande_lignes', JSON.stringify([]));
-  }
-
-  private async createTables() {
-    if (!this.db) return;
-
-    // Table Articles
-    await this.db.execute(`
-      CREATE TABLE IF NOT EXISTS articles (
-        id TEXT PRIMARY KEY,
-        nom TEXT NOT NULL,
-        categorie TEXT NOT NULL,
-        description TEXT,
-        taille TEXT,
-        couleur TEXT,
-        prix REAL NOT NULL,
-        devise TEXT NOT NULL,
-        fournisseur_id TEXT,
-        photos TEXT,
-        statut TEXT NOT NULL,
-        notes TEXT,
-        date_creation TEXT NOT NULL,
-        date_modification TEXT NOT NULL,
-        FOREIGN KEY (fournisseur_id) REFERENCES fournisseurs(id)
-      )
-    `);
-
-    await this.db.execute(`
-      CREATE TABLE IF NOT EXISTS fournisseurs (
-        id TEXT PRIMARY KEY,
-        nom TEXT NOT NULL,
-        type TEXT NOT NULL,
-        pays TEXT NOT NULL,
-        ville TEXT NOT NULL,
-        adresse TEXT,
-        localisation TEXT,
-        telephone TEXT,
-        reseaux_sociaux TEXT,
-        articles_principaux TEXT,
-        notes TEXT,
-        date_creation TEXT NOT NULL,
-        date_modification TEXT NOT NULL
-      )
-    `);
-
-    await this.db.execute(`
-      CREATE TABLE IF NOT EXISTS transport (
-        id TEXT PRIMARY KEY,
-        nom TEXT NOT NULL,
-        type TEXT NOT NULL,
-        ville_depart TEXT NOT NULL,
-        pays_depart TEXT NOT NULL,
-        ville_arrivee TEXT NOT NULL,
-        pays_arrivee TEXT NOT NULL,
-        adresse TEXT,
-        telephone TEXT,
-        programme TEXT,
-        duree_trajet TEXT,
-        mode_tarification TEXT,
-        grille_tarifaire TEXT,
-        services TEXT,
-        notes TEXT,
-        date_creation TEXT NOT NULL,
-        date_modification TEXT NOT NULL
-      )
-    `);
-
-    await this.db.execute(`
-      CREATE TABLE IF NOT EXISTS commandes (
-        id TEXT PRIMARY KEY,
-        numero TEXT NOT NULL,
-        date_commande TEXT NOT NULL,
-        fournisseur_id TEXT NOT NULL,
-        transport_id TEXT,
-        cout_transport REAL,
-        cout_total REAL NOT NULL,
-        devise TEXT NOT NULL,
-        mode_paiement TEXT,
-        statut TEXT NOT NULL,
-        notes TEXT,
-        date_creation TEXT NOT NULL,
-        date_modification TEXT NOT NULL,
-        FOREIGN KEY (fournisseur_id) REFERENCES fournisseurs(id),
-        FOREIGN KEY (transport_id) REFERENCES transport(id)
-      )
-    `);
-
-    await this.db.execute(`
-      CREATE TABLE IF NOT EXISTS commande_lignes (
-        id TEXT PRIMARY KEY,
-        commande_id TEXT NOT NULL,
-        article_id TEXT NOT NULL,
-        quantite INTEGER NOT NULL,
-        prix_unitaire REAL NOT NULL,
-        devise TEXT NOT NULL,
-        FOREIGN KEY (commande_id) REFERENCES commandes(id) ON DELETE CASCADE,
-        FOREIGN KEY (article_id) REFERENCES articles(id)
-      )
-    `);
+    return this.initialization;
   }
 
   // ARTICLES
   async createArticle(article: any) {
+    await this.initDatabase();
     if (this.isWeb) {
       const articles = JSON.parse(localStorage.getItem('articles') || '[]');
       articles.push({
@@ -151,7 +39,7 @@ class DatabaseService {
       });
       localStorage.setItem('articles', JSON.stringify(articles));
     } else {
-      if (!this.db) return;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       const query = `
         INSERT INTO articles (id, nom, categorie, description, taille, couleur, prix, devise, 
                              fournisseur_id, photos, statut, notes, date_creation, date_modification)
@@ -167,6 +55,7 @@ class DatabaseService {
   }
 
   async getArticles(filters?: any) {
+    await this.initDatabase();
     if (this.isWeb) {
       let articles = JSON.parse(localStorage.getItem('articles') || '[]');
       
@@ -188,7 +77,7 @@ class DatabaseService {
         new Date(b.date_modification).getTime() - new Date(a.date_modification).getTime()
       );
     } else {
-      if (!this.db) return [];
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       let query = 'SELECT * FROM articles WHERE 1=1';
       const params: any[] = [];
 
@@ -212,6 +101,7 @@ class DatabaseService {
   }
 
   async updateArticle(id: string, article: any) {
+    await this.initDatabase();
     if (this.isWeb) {
       const articles = JSON.parse(localStorage.getItem('articles') || '[]');
       const index = articles.findIndex((a: any) => a.id === id);
@@ -225,7 +115,7 @@ class DatabaseService {
         localStorage.setItem('articles', JSON.stringify(articles));
       }
     } else {
-      if (!this.db) return;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       const query = `
         UPDATE articles SET nom=?, categorie=?, description=?, taille=?, couleur=?, 
                            prix=?, devise=?, fournisseur_id=?, photos=?, statut=?, 
@@ -242,24 +132,26 @@ class DatabaseService {
   }
 
   async deleteArticle(id: string) {
+    await this.initDatabase();
     if (this.isWeb) {
       const articles = JSON.parse(localStorage.getItem('articles') || '[]');
       const filtered = articles.filter((a: any) => a.id !== id);
       localStorage.setItem('articles', JSON.stringify(filtered));
     } else {
-      if (!this.db) return;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       await this.db.run('DELETE FROM articles WHERE id = ?', [id]);
     }
   }
 
   // FOURNISSEURS
   async createFournisseur(fournisseur: any) {
+    await this.initDatabase();
     if (this.isWeb) {
       const fournisseurs = JSON.parse(localStorage.getItem('fournisseurs') || '[]');
       fournisseurs.push(fournisseur);
       localStorage.setItem('fournisseurs', JSON.stringify(fournisseurs));
     } else {
-      if (!this.db) return;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       const query = `
         INSERT INTO fournisseurs (id, nom, type, pays, ville, adresse, localisation,
                                   telephone, reseaux_sociaux, articles_principaux, notes,
@@ -276,6 +168,7 @@ class DatabaseService {
   }
 
   async getFournisseurs(search?: string) {
+    await this.initDatabase();
     if (this.isWeb) {
       let fournisseurs = JSON.parse(localStorage.getItem('fournisseurs') || '[]');
       
@@ -290,7 +183,7 @@ class DatabaseService {
       
       return fournisseurs.sort((a: any, b: any) => a.nom.localeCompare(b.nom));
     } else {
-      if (!this.db) return [];
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       let query = 'SELECT * FROM fournisseurs';
       const params: any[] = [];
 
@@ -306,6 +199,7 @@ class DatabaseService {
   }
 
   async updateFournisseur(id: string, fournisseur: any) {
+    await this.initDatabase();
     if (this.isWeb) {
       const fournisseurs = JSON.parse(localStorage.getItem('fournisseurs') || '[]');
       const index = fournisseurs.findIndex((f: any) => f.id === id);
@@ -318,7 +212,7 @@ class DatabaseService {
         localStorage.setItem('fournisseurs', JSON.stringify(fournisseurs));
       }
     } else {
-      if (!this.db) return;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       const query = `
         UPDATE fournisseurs SET nom=?, type=?, pays=?, ville=?, adresse=?, localisation=?,
                                telephone=?, reseaux_sociaux=?, articles_principaux=?, notes=?,
@@ -335,24 +229,26 @@ class DatabaseService {
   }
 
   async deleteFournisseur(id: string) {
+    await this.initDatabase();
     if (this.isWeb) {
       const fournisseurs = JSON.parse(localStorage.getItem('fournisseurs') || '[]');
       const filtered = fournisseurs.filter((f: any) => f.id !== id);
       localStorage.setItem('fournisseurs', JSON.stringify(filtered));
     } else {
-      if (!this.db) return;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       await this.db.run('DELETE FROM fournisseurs WHERE id = ?', [id]);
     }
   }
 
   // TRANSPORT (même logique)
   async createTransport(transport: any) {
+    await this.initDatabase();
     if (this.isWeb) {
       const transports = JSON.parse(localStorage.getItem('transport') || '[]');
       transports.push(transport);
       localStorage.setItem('transport', JSON.stringify(transports));
     } else {
-      if (!this.db) return;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       const query = `
         INSERT INTO transport (id, nom, type, ville_depart, pays_depart, ville_arrivee,
                               pays_arrivee, adresse, telephone, programme, duree_trajet,
@@ -371,6 +267,7 @@ class DatabaseService {
   }
 
   async getTransports(search?: string) {
+    await this.initDatabase();
     if (this.isWeb) {
       let transports = JSON.parse(localStorage.getItem('transport') || '[]');
       
@@ -385,7 +282,7 @@ class DatabaseService {
       
       return transports.sort((a: any, b: any) => a.nom.localeCompare(b.nom));
     } else {
-      if (!this.db) return [];
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       let query = 'SELECT * FROM transport';
       const params: any[] = [];
 
@@ -401,6 +298,7 @@ class DatabaseService {
   }
 
   async updateTransport(id: string, transport: any) {
+    await this.initDatabase();
     if (this.isWeb) {
       const transports = JSON.parse(localStorage.getItem('transport') || '[]');
       const index = transports.findIndex((t: any) => t.id === id);
@@ -413,7 +311,7 @@ class DatabaseService {
         localStorage.setItem('transport', JSON.stringify(transports));
       }
     } else {
-      if (!this.db) return;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       const query = `
         UPDATE transport SET nom=?, type=?, ville_depart=?, pays_depart=?, ville_arrivee=?,
                             pays_arrivee=?, adresse=?, telephone=?, programme=?, duree_trajet=?,
@@ -432,18 +330,20 @@ class DatabaseService {
   }
 
   async deleteTransport(id: string) {
+    await this.initDatabase();
     if (this.isWeb) {
       const transports = JSON.parse(localStorage.getItem('transport') || '[]');
       const filtered = transports.filter((t: any) => t.id !== id);
       localStorage.setItem('transport', JSON.stringify(filtered));
     } else {
-      if (!this.db) return;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       await this.db.run('DELETE FROM transport WHERE id = ?', [id]);
     }
   }
 
   // COMMANDES
   async createCommande(commande: any, lignes: any[]) {
+    await this.initDatabase();
     if (this.isWeb) {
       const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
       commandes.push(commande);
@@ -453,7 +353,7 @@ class DatabaseService {
       allLignes.push(...lignes.map(l => ({ ...l, commande_id: commande.id })));
       localStorage.setItem('commande_lignes', JSON.stringify(allLignes));
     } else {
-      if (!this.db) return;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       const query = `
         INSERT INTO commandes (id, numero, date_commande, fournisseur_id, transport_id,
                               cout_transport, cout_total, devise, mode_paiement, statut,
@@ -477,6 +377,7 @@ class DatabaseService {
   }
 
   async getCommandes(filters?: any) {
+    await this.initDatabase();
     if (this.isWeb) {
       let commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
       
@@ -488,7 +389,7 @@ class DatabaseService {
         new Date(b.dateCommande).getTime() - new Date(a.dateCommande).getTime()
       );
     } else {
-      if (!this.db) return [];
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       let query = 'SELECT * FROM commandes WHERE 1=1';
       const params: any[] = [];
 
@@ -504,6 +405,7 @@ class DatabaseService {
   }
 
   async getCommandeById(id: string) {
+    await this.initDatabase();
     if (this.isWeb) {
       const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
       const commande = commandes.find((c: any) => c.id === id);
@@ -515,7 +417,7 @@ class DatabaseService {
 
       return { ...commande, lignes };
     } else {
-      if (!this.db) return null;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       const commande = await this.db.query('SELECT * FROM commandes WHERE id = ?', [id]);
       if (!commande.values?.[0]) return null;
 
@@ -529,6 +431,7 @@ class DatabaseService {
   }
 
   async updateCommande(id: string, commande: any, lignes?: any[]) {
+    await this.initDatabase();
     if (this.isWeb) {
       const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
       const index = commandes.findIndex((c: any) => c.id === id);
@@ -548,7 +451,7 @@ class DatabaseService {
         localStorage.setItem('commande_lignes', JSON.stringify(filtered));
       }
     } else {
-      if (!this.db) return;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       const query = `
         UPDATE commandes SET date_commande=?, fournisseur_id=?, transport_id=?,
                             cout_transport=?, cout_total=?, devise=?, mode_paiement=?,
@@ -575,6 +478,7 @@ class DatabaseService {
   }
 
   async deleteCommande(id: string) {
+    await this.initDatabase();
     if (this.isWeb) {
       const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
       const filtered = commandes.filter((c: any) => c.id !== id);
@@ -584,7 +488,7 @@ class DatabaseService {
       const filteredLignes = allLignes.filter((l: any) => l.commande_id !== id);
       localStorage.setItem('commande_lignes', JSON.stringify(filteredLignes));
     } else {
-      if (!this.db) return;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       await this.db.run('DELETE FROM commande_lignes WHERE commande_id = ?', [id]);
       await this.db.run('DELETE FROM commandes WHERE id = ?', [id]);
     }
@@ -592,6 +496,7 @@ class DatabaseService {
 
   // STATISTIQUES
   async getStats() {
+    await this.initDatabase();
     if (this.isWeb) {
       const articles = JSON.parse(localStorage.getItem('articles') || '[]');
       const fournisseurs = JSON.parse(localStorage.getItem('fournisseurs') || '[]');
@@ -615,7 +520,7 @@ class DatabaseService {
         totalAchats
       };
     } else {
-      if (!this.db) return null;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
 
       const articles = await this.db.query('SELECT COUNT(*) as count FROM articles');
       const fournisseurs = await this.db.query('SELECT COUNT(*) as count FROM fournisseurs');
@@ -632,13 +537,14 @@ class DatabaseService {
   }
 
   async getRecentCommandes(limit: number = 5) {
+    await this.initDatabase();
     if (this.isWeb) {
       const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
       return commandes
         .sort((a: any, b: any) => new Date(b.dateCommande).getTime() - new Date(a.dateCommande).getTime())
         .slice(0, limit);
     } else {
-      if (!this.db) return [];
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       const result = await this.db.query(
         'SELECT * FROM commandes ORDER BY date_commande DESC LIMIT ?',
         [limit]
