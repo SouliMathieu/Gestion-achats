@@ -44,7 +44,8 @@ export class DatabaseService {
       throw new Error('La base est déjà initialisée.');
     } catch (error) {
       if (!(error instanceof Error) || !('code' in error) ||
-        (error as {code?: string}).code !== 'EMPTY_DATABASE_CONFIRMATION') throw error;
+        (error as {code?: string}).code !== 'EMPTY_DATABASE_CONFIRMATION' &&
+        (error as {code?: string}).code !== 'SCHEMA_COMPLETION_CONFIRMATION') throw error;
     }
     const pending = initializeNativeDatabase(this.sqlite, true).then(initialized => {
       this.db = initialized.db;
