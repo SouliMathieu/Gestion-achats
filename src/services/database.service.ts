@@ -192,32 +192,24 @@ export class DatabaseService {
 
   async updateFournisseur(id: string, fournisseur: any) {
     await this.initDatabase();
+    const patch = normalizeFournisseur(fournisseur);
+    const modifiedAt = new Date().toISOString();
     if (this.isWeb) {
-      const fournisseurs = JSON.parse(localStorage.getItem('fournisseurs') || '[]');
-      const index = fournisseurs.findIndex((f: any) => f.id === id);
-      if (index !== -1) {
-        fournisseurs[index] = {
-          ...fournisseur,
-          id,
-          date_modification: new Date().toISOString()
-        };
-        localStorage.setItem('fournisseurs', JSON.stringify(fournisseurs));
-      }
-    } else {
-      if (!this.db) throw new Error('Connexion SQLite indisponible.');
-      const query = `
-        UPDATE fournisseurs SET nom=?, type=?, pays=?, ville=?, adresse=?, localisation=?,
-                               telephone=?, reseaux_sociaux=?, articles_principaux=?, notes=?,
-                               date_modification=?
-        WHERE id=?
-      `;
-      await this.db.run(query, [
-        fournisseur.nom, fournisseur.type, fournisseur.pays, fournisseur.ville,
-        fournisseur.adresse, fournisseur.localisation, fournisseur.telephone,
-        fournisseur.reseauxSociaux, fournisseur.articlesPrincipaux, fournisseur.notes,
-        new Date().toISOString(), id
-      ]);
+      const records = JSON.parse(localStorage.getItem('fournisseurs') || '[]');
+      const index = records.findIndex((item: any) => item.id === id);
+      if (index === -1) return;
+      records[index] = mergeWebRecord(records[index], patch, FOURNISSEUR_ALIASES, id, modifiedAt);
+      localStorage.setItem('fournisseurs', JSON.stringify(records));
+      return;
     }
+    if (!this.db) throw new Error('Connexion SQLite indisponible.');
+    const update = buildSqlUpdate(patch, [
+      {key:'nom',column:'nom'}, {key:'type',column:'type'}, {key:'pays',column:'pays'}, {key:'ville',column:'ville'},
+      {key:'adresse',column:'adresse'}, {key:'localisation',column:'localisation'}, {key:'telephone',column:'telephone'},
+      {key:'reseauxSociaux',legacy:'reseaux_sociaux',column:'reseaux_sociaux'},
+      {key:'articlesPrincipaux',legacy:'articles_principaux',column:'articles_principaux'}, {key:'notes',column:'notes'}
+    ], modifiedAt);
+    await this.db.run('UPDATE fournisseurs SET ' + update.assignments.join(',') + ' WHERE id=?', [...update.values,id]);
   }
 
   async deleteFournisseur(id: string) {
@@ -292,34 +284,26 @@ export class DatabaseService {
 
   async updateTransport(id: string, transport: any) {
     await this.initDatabase();
+    const patch = normalizeTransport(transport);
+    const modifiedAt = new Date().toISOString();
     if (this.isWeb) {
-      const transports = JSON.parse(localStorage.getItem('transport') || '[]');
-      const index = transports.findIndex((t: any) => t.id === id);
-      if (index !== -1) {
-        transports[index] = {
-          ...transport,
-          id,
-          date_modification: new Date().toISOString()
-        };
-        localStorage.setItem('transport', JSON.stringify(transports));
-      }
-    } else {
-      if (!this.db) throw new Error('Connexion SQLite indisponible.');
-      const query = `
-        UPDATE transport SET nom=?, type=?, ville_depart=?, pays_depart=?, ville_arrivee=?,
-                            pays_arrivee=?, adresse=?, telephone=?, programme=?, duree_trajet=?,
-                            mode_tarification=?, grille_tarifaire=?, services=?, notes=?,
-                            date_modification=?
-        WHERE id=?
-      `;
-      await this.db.run(query, [
-        transport.nom, transport.type, transport.villeDepart, transport.paysDepart,
-        transport.villeArrivee, transport.paysArrivee, transport.adresse, transport.telephone,
-        transport.programme, transport.dureeTrajet, transport.modeTarification,
-        transport.grilleTarifaire, transport.services, transport.notes,
-        new Date().toISOString(), id
-      ]);
+      const records = JSON.parse(localStorage.getItem('transport') || '[]');
+      const index = records.findIndex((item: any) => item.id === id);
+      if (index === -1) return;
+      records[index] = mergeWebRecord(records[index], patch, TRANSPORT_ALIASES, id, modifiedAt);
+      localStorage.setItem('transport', JSON.stringify(records));
+      return;
     }
+    if (!this.db) throw new Error('Connexion SQLite indisponible.');
+    const update = buildSqlUpdate(patch, [
+      {key:'nom',column:'nom'}, {key:'type',column:'type'}, {key:'villeDepart',legacy:'ville_depart',column:'ville_depart'},
+      {key:'paysDepart',legacy:'pays_depart',column:'pays_depart'}, {key:'villeArrivee',legacy:'ville_arrivee',column:'ville_arrivee'},
+      {key:'paysArrivee',legacy:'pays_arrivee',column:'pays_arrivee'}, {key:'adresse',column:'adresse'},
+      {key:'telephone',column:'telephone'}, {key:'programme',column:'programme'}, {key:'dureeTrajet',legacy:'duree_trajet',column:'duree_trajet'},
+      {key:'modeTarification',legacy:'mode_tarification',column:'mode_tarification'}, {key:'grilleTarifaire',legacy:'grille_tarifaire',column:'grille_tarifaire'},
+      {key:'services',column:'services'}, {key:'notes',column:'notes'}
+    ], modifiedAt);
+    await this.db.run('UPDATE transport SET ' + update.assignments.join(',') + ' WHERE id=?', [...update.values,id]);
   }
 
   async deleteTransport(id: string) {
