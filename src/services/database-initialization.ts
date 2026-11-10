@@ -6,7 +6,7 @@ export type { NativeConnections } from './database-sqlite-support';
 
 export const DATABASE_NAME = 'gestion_achats';
 export const SCHEMA_VERSION = 1;
-export type SchemaKind = 'new' | 'historical' | 'current' | 'partial' | 'unknown';
+export type SchemaKind = 'new' | 'empty-existing' | 'historical' | 'current' | 'partial' | 'unknown';
 export interface InitializationReport {
   storage: 'sqlite' | 'localStorage';
   kind: SchemaKind;
@@ -77,11 +77,10 @@ export async function inspectDatabase(db: SQLiteDBConnection, existed: boolean):
   let kind: SchemaKind;
   if (version > SCHEMA_VERSION || unsupported || !matches) kind = 'unknown';
   else if (tables.length === TABLE_NAMES.length) kind = version === 0 ? 'historical' : 'current';
-  else if (Object.values(counts).every(count => count === 0)) {
-    // Une base existante sans données métier (ou avec seulement un sous-ensemble
-    // exact des tables historiques, toutes vides) peut être initialisée de façon additive.
-    // CREATE TABLE IF NOT EXISTS conserve les tables déjà présentes ; aucun objet n'est supprimé.
-    kind = 'new';
+  else if (tables.length === 0 && version === 0) {
+    // Une base présente mais dépourvue de tables applicatives peut être le résultat
+    // d'une création interrompue : elle exige une confirmation explicite.
+    kind = 'empty-existing';
   } else kind = 'partial';
   return {storage: 'sqlite', kind, version, counts, schema};
 }
@@ -114,7 +113,7 @@ export async function captureDatabase(db: SQLiteDBConnection, inspection: Inspec
 // Catalogue volontairement limité : reconnaissance du schéma historique, sans réécriture métier.
 export const MIGRATIONS = [{id: 'recognize-historical-schema', from: 0, to: 1}] as const;
 
-async function baseline(db: SQLiteDBConnection, sqlite: NativeConnections, existed: boolean): Promise<InitializationReport> {
+async function baseline(db: SQLiteDBConnection, sqlite: NativeConnections, existed: boolean, confirmEmptyExisting: boolean): Promise<InitializationReport> {
   let active = false;
   try {
     active = true;
@@ -122,6 +121,10 @@ async function baseline(db: SQLiteDBConnection, sqlite: NativeConnections, exist
     // Relecture sous verrou : une inspection antérieure ne suffit pas à autoriser une écriture.
     const before = await inspectDatabase(db, existed);
     requireKnown(before);
+    if (before.kind === 'empty-existing' && !confirmEmptyExisting) {
+      throw new DatabaseInitializationError('EMPTY_DATABASE_CONFIRMATION',
+        'Une base existe déjà mais ne contient aucune table applicative. Confirmez son initialisation pour poursuivre sans effacer de données.');
+    }
     if (before.kind === 'current') {
       await db.commitTransaction();
       active = false;
@@ -145,7 +148,7 @@ async function baseline(db: SQLiteDBConnection, sqlite: NativeConnections, exist
           'La copie de protection n’a pas pu être vérifiée. Aucune migration n’a été appliquée. Vérifiez l’espace disponible avant de relancer l’application.', before, error);
       }
     }
-    if (before.kind === 'new') {
+    if (before.kind === 'new' || before.kind === 'empty-existing') {
       for (const sql of Object.values(HISTORICAL_SCHEMA)) await db.execute(sql + ';', false);
     }
     await db.execute(`PRAGMA user_version = ${MIGRATIONS[0].to};`, false);
@@ -175,20 +178,32 @@ async function baseline(db: SQLiteDBConnection, sqlite: NativeConnections, exist
   }
 }
 
-export async function initializeNativeDatabase(sqlite: NativeConnections): Promise<{db: SQLiteDBConnection; report: InitializationReport}> {
+export async function initializeNativeDatabase(sqlite: NativeConnections, confirmEmptyExisting = false): Promise<{db: SQLiteDBConnection; report: InitializationReport}> {
   try {
     const existence = await sqlite.isDatabase(DATABASE_NAME);
     if (typeof existence.result !== 'boolean') throw new Error('Existence de la base indéterminée.');
     if (existence.result) {
       // Un schéma inconnu est refusé avant même l'ouverture en écriture.
       const probe = await openConnection(sqlite, DATABASE_NAME, true);
-      try { requireKnown(await inspectDatabase(probe, true)); }
-      finally { await sqlite.closeConnection(DATABASE_NAME, true); }
+      try {
+        const probeReport = await inspectDatabase(probe, true);
+        requireKnown(probeReport);
+        if (probeReport.kind === 'empty-existing' && !confirmEmptyExisting) {
+          throw new DatabaseInitializationError('EMPTY_DATABASE_CONFIRMATION',
+            'Une base existe déjà mais ne contient aucune table applicative. Confirmez son initialisation pour poursuivre sans effacer de données.',
+            probeReport);
+        }
+      } finally { await sqlite.closeConnection(DATABASE_NAME, true); }
     }
     const db = await openConnection(sqlite, DATABASE_NAME, false);
     const inspection = await inspectDatabase(db, existence.result);
     requireKnown(inspection);
-    const report = inspection.kind === 'current' ? inspection : await baseline(db, sqlite, existence.result);
+    if (inspection.kind === 'empty-existing' && !confirmEmptyExisting) {
+      throw new DatabaseInitializationError('EMPTY_DATABASE_CONFIRMATION',
+        'Une base existe déjà mais ne contient aucune table applicative. Confirmez son initialisation pour poursuivre sans effacer de données.',
+        inspection);
+    }
+    const report = inspection.kind === 'current' ? inspection : await baseline(db, sqlite, existence.result, confirmEmptyExisting);
     return {db, report};
   } catch (error) {
     if (error instanceof DatabaseInitializationError) throw error;
