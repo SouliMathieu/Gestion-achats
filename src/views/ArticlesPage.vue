@@ -519,6 +519,12 @@ const deleteArticle = async (id: string) => {
     await loadArticles();
   } catch (error) {
     console.error('Erreur suppression:', error);
+    const toast = await toastController.create({
+      message: error instanceof Error ? error.message : 'La suppression a échoué. Aucune donnée n’a été supprimée.',
+      duration: 3500,
+      color: 'danger'
+    });
+    await toast.present();
   }
 };
 
