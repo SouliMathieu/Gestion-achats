@@ -2,7 +2,7 @@ name: Build Android APK & Desktop
 
 on:
   push:
-    branches: [ main, feat/backup-restore-v2 ]
+    branches: [ main, feat/backup-restore-v2, fix/confirm-empty-db-initialization ]
   workflow_dispatch: {}
 
 jobs:
