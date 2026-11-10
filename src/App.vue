@@ -1,6 +1,22 @@
 <template>
   <ion-app>
-    <ion-tabs>
+    <ion-page v-if="databaseState !== 'ready'">
+      <ion-content class="ion-padding">
+        <div role="status" aria-live="polite" class="database-state">
+          <template v-if="databaseState === 'loading'">
+            <ion-spinner aria-label="Chargement" />
+            <h1>Ouverture de vos données…</h1>
+          </template>
+          <template v-else>
+            <h1>Vos données sont indisponibles</h1>
+            <p>{{ databaseError }}</p>
+            <p>Aucune réinitialisation automatique n’est effectuée. Ne désinstallez pas l’application et ne videz pas son stockage.</p>
+            <ion-button @click="reloadApplication">Réessayer l’ouverture</ion-button>
+          </template>
+        </div>
+      </ion-content>
+    </ion-page>
+    <ion-tabs v-else>
       <ion-router-outlet></ion-router-outlet>
       <ion-tab-bar slot="bottom">
         <ion-tab-button tab="dashboard" href="/dashboard">
@@ -33,17 +49,38 @@
 </template>
 
 <script setup lang="ts">
-import { IonApp, IonRouterOutlet, IonTabs, IonTabBar, IonTabButton, IonIcon, IonLabel } from '@ionic/vue';
+import { IonApp, IonRouterOutlet, IonTabs, IonTabBar, IonTabButton, IonIcon, IonLabel, IonPage, IonContent, IonSpinner, IonButton } from '@ionic/vue';
 import { pieChartOutline, cubeOutline, storefrontOutline, airplaneOutline, cartOutline } from 'ionicons/icons';
-import { onMounted } from 'vue';
+import { onMounted, ref } from 'vue';
 import DatabaseService from '@/services/database.service';
+import { DatabaseInitializationError } from '@/services/database-initialization';
+import { backupService } from '@/services/backup.service';
+
+const databaseState = ref<'loading' | 'ready' | 'error'>('loading');
+const databaseError = ref('');
+const reloadApplication = () => window.location.reload();
 
 onMounted(async () => {
-  await DatabaseService.initDatabase();
+  try {
+    await DatabaseService.initDatabase();
+    databaseState.value = 'ready';
+    // Une seule copie automatique par jour ; son échec ne bloque jamais l'accès aux données.
+    void backupService.ensureDailySnapshot().catch(error => {
+      console.warn('Sauvegarde automatique locale indisponible :', error);
+    });
+  } catch (error) {
+    databaseError.value = error instanceof DatabaseInitializationError ? error.message : 'L’ouverture du stockage a échoué.';
+    databaseState.value = 'error';
+  }
 });
 </script>
 
 <style>
+.database-state {
+  max-width: 40rem;
+  margin: 12vh auto;
+}
+
 :root {
   --ion-color-primary: #667eea;
   --ion-color-primary-rgb: 102, 126, 234;

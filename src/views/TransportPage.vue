@@ -32,8 +32,8 @@
             </ion-avatar>
             <ion-label>
               <h2>{{ transport.nom }}</h2>
-              <p>{{ transport.ville_depart }} → {{ transport.ville_arrivee }}</p>
-              <p>{{ transport.type }} • {{ transport.duree_trajet || 'N/A' }}</p>
+              <p>{{ transport.villeDepart ?? transport.ville_depart }} → {{ transport.villeArrivee ?? transport.ville_arrivee }}</p>
+              <p>{{ transport.type }} • {{ transport.dureeTrajet ?? transport.duree_trajet ?? 'N/A' }}</p>
             </ion-label>
           </ion-item>
 
@@ -279,8 +279,8 @@ const filteredTransports = computed(() => {
   const search = searchText.value.toLowerCase();
   return transports.value.filter(t =>
     t.nom.toLowerCase().includes(search) ||
-    t.ville_depart.toLowerCase().includes(search) ||
-    t.ville_arrivee.toLowerCase().includes(search)
+    (t.villeDepart ?? t.ville_depart ?? '').toLowerCase().includes(search) ||
+    (t.villeArrivee ?? t.ville_arrivee ?? '').toLowerCase().includes(search)
   );
 });
 
@@ -317,16 +317,16 @@ const editTransport = (transport: any) => {
   formData.value = {
     nom: transport.nom,
     type: transport.type,
-    villeDepart: transport.ville_depart,
-    paysDepart: transport.pays_depart,
-    villeArrivee: transport.ville_arrivee,
-    paysArrivee: transport.pays_arrivee,
+    villeDepart: transport.villeDepart ?? transport.ville_depart,
+    paysDepart: transport.paysDepart ?? transport.pays_depart,
+    villeArrivee: transport.villeArrivee ?? transport.ville_arrivee,
+    paysArrivee: transport.paysArrivee ?? transport.pays_arrivee,
     adresse: transport.adresse || '',
     telephone: transport.telephone || '',
     programme: transport.programme || '',
-    dureeTrajet: transport.duree_trajet || '',
-    modeTarification: transport.mode_tarification || '',
-    grilleTarifaire: transport.grille_tarifaire || '',
+    dureeTrajet: transport.dureeTrajet ?? transport.duree_trajet ?? '',
+    modeTarification: transport.modeTarification ?? transport.mode_tarification ?? '',
+    grilleTarifaire: transport.grilleTarifaire ?? transport.grille_tarifaire ?? '',
     services: transport.services || '',
     notes: transport.notes || ''
   };
@@ -376,7 +376,7 @@ const saveTransport = async () => {
       grilleTarifaire: formData.value.grilleTarifaire,
       services: formData.value.services,
       notes: formData.value.notes,
-      dateCreation: editingTransport.value?.date_creation || new Date().toISOString(),
+      dateCreation: editingTransport.value?.dateCreation ?? editingTransport.value?.date_creation ?? new Date().toISOString(),
       dateModification: new Date().toISOString()
     };
 
@@ -434,6 +434,12 @@ const deleteTransport = async (id: string) => {
     await loadTransports();
   } catch (error) {
     console.error('Erreur suppression:', error);
+    const toast = await toastController.create({
+      message: error instanceof Error ? error.message : 'La suppression a échoué. Aucune donnée n’a été supprimée.',
+      duration: 3500,
+      color: 'danger'
+    });
+    await toast.present();
   }
 };
 

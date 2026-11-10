@@ -98,6 +98,10 @@
               <ion-icon slot="start" :icon="cartOutline"></ion-icon>
               Nouvelle commande
             </ion-button>
+            <ion-button expand="block" fill="outline" @click="goTo('/sauvegardes')">
+              <ion-icon slot="start" :icon="cloudDownloadOutline"></ion-icon>
+              Sauvegarde et restauration
+            </ion-button>
           </div>
         </ion-card-content>
       </ion-card>
@@ -114,7 +118,7 @@ import {
   IonList, IonItem, IonLabel, IonBadge, IonRefresher, IonRefresherContent
 } from '@ionic/vue';
 import {
-  refreshOutline, addOutline, cartOutline
+  refreshOutline, addOutline, cartOutline, cloudDownloadOutline
 } from 'ionicons/icons';
 import DatabaseService from '@/services/database.service';
 

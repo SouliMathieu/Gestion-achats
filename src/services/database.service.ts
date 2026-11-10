@@ -1,157 +1,49 @@
 import { Capacitor } from '@capacitor/core';
 import { CapacitorSQLite, SQLiteConnection, SQLiteDBConnection } from '@capacitor-community/sqlite';
 
-class DatabaseService {
+import { initializeNativeDatabase, type InitializationReport, type NativeConnections } from './database-initialization';
+import { initializeWebStorage } from './database-web-initialization';
+import { normalizeArticle, normalizeFournisseur, normalizeTransport, normalizeCommande, normalizeCommandeLine, mergeWebRecord, buildSqlUpdate, serializePhotos, ARTICLE_ALIASES, FOURNISSEUR_ALIASES, TRANSPORT_ALIASES, COMMANDE_ALIASES } from './database-models';
+import { writeWebTransaction } from './database-web-transaction';
+import { TABLE_NAMES, type TableName } from './database-schema';
+
+export class DatabaseService {
   private db: SQLiteDBConnection | null = null;
-  private sqlite: SQLiteConnection;
+  private sqlite: NativeConnections;
   private isWeb: boolean;
+  private initialization: Promise<InitializationReport> | null = null;
 
-  constructor() {
-    this.sqlite = new SQLiteConnection(CapacitorSQLite);
-    this.isWeb = Capacitor.getPlatform() === 'web';
+  constructor(options?: { sqlite?: NativeConnections; platform?: string }) {
+    this.sqlite = options?.sqlite ?? new SQLiteConnection(CapacitorSQLite);
+    this.isWeb = (options?.platform ?? Capacitor.getPlatform()) === 'web';
   }
 
-  async initDatabase() {
-    try {
-      if (this.isWeb) {
-        console.log('Mode WEB : Utilisation de localStorage');
-        this.initWebStorage();
-      } else {
-        console.log('Mode NATIF : Utilisation de SQLite');
-        this.db = await this.sqlite.createConnection(
-          'gestion_achats',
-          false,
-          'no-encryption',
-          1,
-          false
-        );
-        await this.db.open();
-        await this.createTables();
-      }
-      console.log('Base de données initialisée');
-    } catch (error) {
-      console.error('Erreur initialisation DB:', error);
+  // Un échec reste mémorisé : aucun nouvel essai ni recréation implicite.
+  initDatabase(): Promise<InitializationReport> {
+    if (!this.initialization) {
+      this.initialization = Promise.resolve().then(async () => {
+        if (this.isWeb) return initializeWebStorage(localStorage);
+        const initialized = await initializeNativeDatabase(this.sqlite);
+        this.db = initialized.db;
+        return initialized.report;
+      });
     }
-  }
-
-  private initWebStorage() {
-    // Initialiser les collections dans localStorage si elles n'existent pas
-    if (!localStorage.getItem('articles')) localStorage.setItem('articles', JSON.stringify([]));
-    if (!localStorage.getItem('fournisseurs')) localStorage.setItem('fournisseurs', JSON.stringify([]));
-    if (!localStorage.getItem('transport')) localStorage.setItem('transport', JSON.stringify([]));
-    if (!localStorage.getItem('commandes')) localStorage.setItem('commandes', JSON.stringify([]));
-    if (!localStorage.getItem('commande_lignes')) localStorage.setItem('commande_lignes', JSON.stringify([]));
-  }
-
-  private async createTables() {
-    if (!this.db) return;
-
-    // Table Articles
-    await this.db.execute(`
-      CREATE TABLE IF NOT EXISTS articles (
-        id TEXT PRIMARY KEY,
-        nom TEXT NOT NULL,
-        categorie TEXT NOT NULL,
-        description TEXT,
-        taille TEXT,
-        couleur TEXT,
-        prix REAL NOT NULL,
-        devise TEXT NOT NULL,
-        fournisseur_id TEXT,
-        photos TEXT,
-        statut TEXT NOT NULL,
-        notes TEXT,
-        date_creation TEXT NOT NULL,
-        date_modification TEXT NOT NULL,
-        FOREIGN KEY (fournisseur_id) REFERENCES fournisseurs(id)
-      )
-    `);
-
-    await this.db.execute(`
-      CREATE TABLE IF NOT EXISTS fournisseurs (
-        id TEXT PRIMARY KEY,
-        nom TEXT NOT NULL,
-        type TEXT NOT NULL,
-        pays TEXT NOT NULL,
-        ville TEXT NOT NULL,
-        adresse TEXT,
-        localisation TEXT,
-        telephone TEXT,
-        reseaux_sociaux TEXT,
-        articles_principaux TEXT,
-        notes TEXT,
-        date_creation TEXT NOT NULL,
-        date_modification TEXT NOT NULL
-      )
-    `);
-
-    await this.db.execute(`
-      CREATE TABLE IF NOT EXISTS transport (
-        id TEXT PRIMARY KEY,
-        nom TEXT NOT NULL,
-        type TEXT NOT NULL,
-        ville_depart TEXT NOT NULL,
-        pays_depart TEXT NOT NULL,
-        ville_arrivee TEXT NOT NULL,
-        pays_arrivee TEXT NOT NULL,
-        adresse TEXT,
-        telephone TEXT,
-        programme TEXT,
-        duree_trajet TEXT,
-        mode_tarification TEXT,
-        grille_tarifaire TEXT,
-        services TEXT,
-        notes TEXT,
-        date_creation TEXT NOT NULL,
-        date_modification TEXT NOT NULL
-      )
-    `);
-
-    await this.db.execute(`
-      CREATE TABLE IF NOT EXISTS commandes (
-        id TEXT PRIMARY KEY,
-        numero TEXT NOT NULL,
-        date_commande TEXT NOT NULL,
-        fournisseur_id TEXT NOT NULL,
-        transport_id TEXT,
-        cout_transport REAL,
-        cout_total REAL NOT NULL,
-        devise TEXT NOT NULL,
-        mode_paiement TEXT,
-        statut TEXT NOT NULL,
-        notes TEXT,
-        date_creation TEXT NOT NULL,
-        date_modification TEXT NOT NULL,
-        FOREIGN KEY (fournisseur_id) REFERENCES fournisseurs(id),
-        FOREIGN KEY (transport_id) REFERENCES transport(id)
-      )
-    `);
-
-    await this.db.execute(`
-      CREATE TABLE IF NOT EXISTS commande_lignes (
-        id TEXT PRIMARY KEY,
-        commande_id TEXT NOT NULL,
-        article_id TEXT NOT NULL,
-        quantite INTEGER NOT NULL,
-        prix_unitaire REAL NOT NULL,
-        devise TEXT NOT NULL,
-        FOREIGN KEY (commande_id) REFERENCES commandes(id) ON DELETE CASCADE,
-        FOREIGN KEY (article_id) REFERENCES articles(id)
-      )
-    `);
+    return this.initialization;
   }
 
   // ARTICLES
   async createArticle(article: any) {
+    await this.initDatabase();
+    article = normalizeArticle(article);
     if (this.isWeb) {
       const articles = JSON.parse(localStorage.getItem('articles') || '[]');
       articles.push({
         ...article,
-        photos: article.photos?.join('|||')
+        photos: serializePhotos(article.photos)
       });
       localStorage.setItem('articles', JSON.stringify(articles));
     } else {
-      if (!this.db) return;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       const query = `
         INSERT INTO articles (id, nom, categorie, description, taille, couleur, prix, devise, 
                              fournisseur_id, photos, statut, notes, date_creation, date_modification)
@@ -160,13 +52,14 @@ class DatabaseService {
       await this.db.run(query, [
         article.id, article.nom, article.categorie, article.description,
         article.taille, article.couleur, article.prix, article.devise,
-        article.fournisseurId, article.photos?.join('|||'), article.statut,
+        article.fournisseurId, serializePhotos(article.photos), article.statut,
         article.notes, article.dateCreation, article.dateModification
       ]);
     }
   }
 
   async getArticles(filters?: any) {
+    await this.initDatabase();
     if (this.isWeb) {
       let articles = JSON.parse(localStorage.getItem('articles') || '[]');
       
@@ -184,11 +77,9 @@ class DatabaseService {
         );
       }
       
-      return articles.sort((a: any, b: any) => 
-        new Date(b.date_modification).getTime() - new Date(a.date_modification).getTime()
-      );
+      return articles.map(normalizeArticle).sort((a: any, b: any) => new Date(b.dateModification || 0).getTime() - new Date(a.dateModification || 0).getTime());
     } else {
-      if (!this.db) return [];
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       let query = 'SELECT * FROM articles WHERE 1=1';
       const params: any[] = [];
 
@@ -207,59 +98,60 @@ class DatabaseService {
 
       query += ' ORDER BY date_modification DESC';
       const result = await this.db.query(query, params);
-      return result.values || [];
+      return (result.values || []).map(normalizeArticle);
     }
   }
 
   async updateArticle(id: string, article: any) {
+    await this.initDatabase();
+    const patch = normalizeArticle(article);
+    const modifiedAt = new Date().toISOString();
     if (this.isWeb) {
-      const articles = JSON.parse(localStorage.getItem('articles') || '[]');
-      const index = articles.findIndex((a: any) => a.id === id);
-      if (index !== -1) {
-        articles[index] = {
-          ...article,
-          id,
-          photos: article.photos?.join('|||'),
-          date_modification: new Date().toISOString()
-        };
-        localStorage.setItem('articles', JSON.stringify(articles));
-      }
-    } else {
-      if (!this.db) return;
-      const query = `
-        UPDATE articles SET nom=?, categorie=?, description=?, taille=?, couleur=?, 
-                           prix=?, devise=?, fournisseur_id=?, photos=?, statut=?, 
-                           notes=?, date_modification=?
-        WHERE id=?
-      `;
-      await this.db.run(query, [
-        article.nom, article.categorie, article.description, article.taille,
-        article.couleur, article.prix, article.devise, article.fournisseurId,
-        article.photos?.join('|||'), article.statut, article.notes,
-        new Date().toISOString(), id
-      ]);
+      const records = JSON.parse(localStorage.getItem('articles') || '[]');
+      const index = records.findIndex((item: any) => item.id === id);
+      if (index === -1) return;
+      records[index] = mergeWebRecord(records[index], patch, ARTICLE_ALIASES, id, modifiedAt);
+      localStorage.setItem('articles', JSON.stringify(records));
+      return;
     }
+    if (!this.db) throw new Error('Connexion SQLite indisponible.');
+    const update = buildSqlUpdate(patch, [
+      {key:'nom',column:'nom'}, {key:'categorie',column:'categorie'}, {key:'description',column:'description'},
+      {key:'taille',column:'taille'}, {key:'couleur',column:'couleur'}, {key:'prix',column:'prix'},
+      {key:'devise',column:'devise'}, {key:'fournisseurId',legacy:'fournisseur_id',column:'fournisseur_id'},
+      {key:'photos',column:'photos',transform:serializePhotos}, {key:'statut',column:'statut'}, {key:'notes',column:'notes'}
+    ], modifiedAt);
+    await this.db.run('UPDATE articles SET ' + update.assignments.join(',') + ' WHERE id=?', [...update.values,id]);
   }
 
   async deleteArticle(id: string) {
+    await this.initDatabase();
     if (this.isWeb) {
+      const lines = JSON.parse(localStorage.getItem('commande_lignes') || '[]');
+      if (lines.some((line: any) => (line.article_id ?? line.articleId) === id)) {
+        throw new Error('Suppression refusée : cet article est utilisé dans au moins une commande.');
+      }
       const articles = JSON.parse(localStorage.getItem('articles') || '[]');
-      const filtered = articles.filter((a: any) => a.id !== id);
-      localStorage.setItem('articles', JSON.stringify(filtered));
+      localStorage.setItem('articles', JSON.stringify(articles.filter((a: any) => a.id !== id)));
     } else {
-      if (!this.db) return;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
+      const refs = await this.db.query('SELECT COUNT(*) AS count FROM commande_lignes WHERE article_id = ?', [id]);
+      if (Number(refs.values?.[0]?.count ?? 0) > 0) {
+        throw new Error('Suppression refusée : cet article est utilisé dans au moins une commande.');
+      }
       await this.db.run('DELETE FROM articles WHERE id = ?', [id]);
     }
   }
 
-  // FOURNISSEURS
   async createFournisseur(fournisseur: any) {
+    await this.initDatabase();
+    fournisseur = normalizeFournisseur(fournisseur);
     if (this.isWeb) {
       const fournisseurs = JSON.parse(localStorage.getItem('fournisseurs') || '[]');
       fournisseurs.push(fournisseur);
       localStorage.setItem('fournisseurs', JSON.stringify(fournisseurs));
     } else {
-      if (!this.db) return;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       const query = `
         INSERT INTO fournisseurs (id, nom, type, pays, ville, adresse, localisation,
                                   telephone, reseaux_sociaux, articles_principaux, notes,
@@ -276,6 +168,7 @@ class DatabaseService {
   }
 
   async getFournisseurs(search?: string) {
+    await this.initDatabase();
     if (this.isWeb) {
       let fournisseurs = JSON.parse(localStorage.getItem('fournisseurs') || '[]');
       
@@ -288,9 +181,9 @@ class DatabaseService {
         );
       }
       
-      return fournisseurs.sort((a: any, b: any) => a.nom.localeCompare(b.nom));
+      return fournisseurs.map(normalizeFournisseur).sort((a: any, b: any) => a.nom.localeCompare(b.nom));
     } else {
-      if (!this.db) return [];
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       let query = 'SELECT * FROM fournisseurs';
       const params: any[] = [];
 
@@ -301,58 +194,65 @@ class DatabaseService {
 
       query += ' ORDER BY nom ASC';
       const result = await this.db.query(query, params);
-      return result.values || [];
+      return (result.values || []).map(normalizeFournisseur);
     }
   }
 
   async updateFournisseur(id: string, fournisseur: any) {
+    await this.initDatabase();
+    const patch = normalizeFournisseur(fournisseur);
+    const modifiedAt = new Date().toISOString();
     if (this.isWeb) {
-      const fournisseurs = JSON.parse(localStorage.getItem('fournisseurs') || '[]');
-      const index = fournisseurs.findIndex((f: any) => f.id === id);
-      if (index !== -1) {
-        fournisseurs[index] = {
-          ...fournisseur,
-          id,
-          date_modification: new Date().toISOString()
-        };
-        localStorage.setItem('fournisseurs', JSON.stringify(fournisseurs));
-      }
-    } else {
-      if (!this.db) return;
-      const query = `
-        UPDATE fournisseurs SET nom=?, type=?, pays=?, ville=?, adresse=?, localisation=?,
-                               telephone=?, reseaux_sociaux=?, articles_principaux=?, notes=?,
-                               date_modification=?
-        WHERE id=?
-      `;
-      await this.db.run(query, [
-        fournisseur.nom, fournisseur.type, fournisseur.pays, fournisseur.ville,
-        fournisseur.adresse, fournisseur.localisation, fournisseur.telephone,
-        fournisseur.reseauxSociaux, fournisseur.articlesPrincipaux, fournisseur.notes,
-        new Date().toISOString(), id
-      ]);
+      const records = JSON.parse(localStorage.getItem('fournisseurs') || '[]');
+      const index = records.findIndex((item: any) => item.id === id);
+      if (index === -1) return;
+      records[index] = mergeWebRecord(records[index], patch, FOURNISSEUR_ALIASES, id, modifiedAt);
+      localStorage.setItem('fournisseurs', JSON.stringify(records));
+      return;
     }
+    if (!this.db) throw new Error('Connexion SQLite indisponible.');
+    const update = buildSqlUpdate(patch, [
+      {key:'nom',column:'nom'}, {key:'type',column:'type'}, {key:'pays',column:'pays'}, {key:'ville',column:'ville'},
+      {key:'adresse',column:'adresse'}, {key:'localisation',column:'localisation'}, {key:'telephone',column:'telephone'},
+      {key:'reseauxSociaux',legacy:'reseaux_sociaux',column:'reseaux_sociaux'},
+      {key:'articlesPrincipaux',legacy:'articles_principaux',column:'articles_principaux'}, {key:'notes',column:'notes'}
+    ], modifiedAt);
+    await this.db.run('UPDATE fournisseurs SET ' + update.assignments.join(',') + ' WHERE id=?', [...update.values,id]);
   }
 
   async deleteFournisseur(id: string) {
+    await this.initDatabase();
     if (this.isWeb) {
+      const articles = JSON.parse(localStorage.getItem('articles') || '[]');
+      const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
+      if (articles.some((a: any) => (a.fournisseur_id ?? a.fournisseurId) === id) ||
+        commandes.some((c: any) => (c.fournisseur_id ?? c.fournisseurId) === id)) {
+        throw new Error('Suppression refusée : ce fournisseur est associé à des articles ou à des commandes.');
+      }
       const fournisseurs = JSON.parse(localStorage.getItem('fournisseurs') || '[]');
-      const filtered = fournisseurs.filter((f: any) => f.id !== id);
-      localStorage.setItem('fournisseurs', JSON.stringify(filtered));
+      localStorage.setItem('fournisseurs', JSON.stringify(fournisseurs.filter((f: any) => f.id !== id)));
     } else {
-      if (!this.db) return;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
+      const [articles, commandes] = await Promise.all([
+        this.db.query('SELECT COUNT(*) AS count FROM articles WHERE fournisseur_id = ?', [id]),
+        this.db.query('SELECT COUNT(*) AS count FROM commandes WHERE fournisseur_id = ?', [id])
+      ]);
+      if (Number(articles.values?.[0]?.count ?? 0) > 0 || Number(commandes.values?.[0]?.count ?? 0) > 0) {
+        throw new Error('Suppression refusée : ce fournisseur est associé à des articles ou à des commandes.');
+      }
       await this.db.run('DELETE FROM fournisseurs WHERE id = ?', [id]);
     }
   }
 
-  // TRANSPORT (même logique)
   async createTransport(transport: any) {
+    await this.initDatabase();
+    transport = normalizeTransport(transport);
     if (this.isWeb) {
       const transports = JSON.parse(localStorage.getItem('transport') || '[]');
       transports.push(transport);
       localStorage.setItem('transport', JSON.stringify(transports));
     } else {
-      if (!this.db) return;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       const query = `
         INSERT INTO transport (id, nom, type, ville_depart, pays_depart, ville_arrivee,
                               pays_arrivee, adresse, telephone, programme, duree_trajet,
@@ -371,6 +271,7 @@ class DatabaseService {
   }
 
   async getTransports(search?: string) {
+    await this.initDatabase();
     if (this.isWeb) {
       let transports = JSON.parse(localStorage.getItem('transport') || '[]');
       
@@ -383,9 +284,9 @@ class DatabaseService {
         );
       }
       
-      return transports.sort((a: any, b: any) => a.nom.localeCompare(b.nom));
+      return transports.map(normalizeTransport).sort((a: any, b: any) => a.nom.localeCompare(b.nom));
     } else {
-      if (!this.db) return [];
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       let query = 'SELECT * FROM transport';
       const params: any[] = [];
 
@@ -396,87 +297,98 @@ class DatabaseService {
 
       query += ' ORDER BY nom ASC';
       const result = await this.db.query(query, params);
-      return result.values || [];
+      return (result.values || []).map(normalizeTransport);
     }
   }
 
   async updateTransport(id: string, transport: any) {
+    await this.initDatabase();
+    const patch = normalizeTransport(transport);
+    const modifiedAt = new Date().toISOString();
     if (this.isWeb) {
-      const transports = JSON.parse(localStorage.getItem('transport') || '[]');
-      const index = transports.findIndex((t: any) => t.id === id);
-      if (index !== -1) {
-        transports[index] = {
-          ...transport,
-          id,
-          date_modification: new Date().toISOString()
-        };
-        localStorage.setItem('transport', JSON.stringify(transports));
-      }
-    } else {
-      if (!this.db) return;
-      const query = `
-        UPDATE transport SET nom=?, type=?, ville_depart=?, pays_depart=?, ville_arrivee=?,
-                            pays_arrivee=?, adresse=?, telephone=?, programme=?, duree_trajet=?,
-                            mode_tarification=?, grille_tarifaire=?, services=?, notes=?,
-                            date_modification=?
-        WHERE id=?
-      `;
-      await this.db.run(query, [
-        transport.nom, transport.type, transport.villeDepart, transport.paysDepart,
-        transport.villeArrivee, transport.paysArrivee, transport.adresse, transport.telephone,
-        transport.programme, transport.dureeTrajet, transport.modeTarification,
-        transport.grilleTarifaire, transport.services, transport.notes,
-        new Date().toISOString(), id
-      ]);
+      const records = JSON.parse(localStorage.getItem('transport') || '[]');
+      const index = records.findIndex((item: any) => item.id === id);
+      if (index === -1) return;
+      records[index] = mergeWebRecord(records[index], patch, TRANSPORT_ALIASES, id, modifiedAt);
+      localStorage.setItem('transport', JSON.stringify(records));
+      return;
     }
+    if (!this.db) throw new Error('Connexion SQLite indisponible.');
+    const update = buildSqlUpdate(patch, [
+      {key:'nom',column:'nom'}, {key:'type',column:'type'}, {key:'villeDepart',legacy:'ville_depart',column:'ville_depart'},
+      {key:'paysDepart',legacy:'pays_depart',column:'pays_depart'}, {key:'villeArrivee',legacy:'ville_arrivee',column:'ville_arrivee'},
+      {key:'paysArrivee',legacy:'pays_arrivee',column:'pays_arrivee'}, {key:'adresse',column:'adresse'},
+      {key:'telephone',column:'telephone'}, {key:'programme',column:'programme'}, {key:'dureeTrajet',legacy:'duree_trajet',column:'duree_trajet'},
+      {key:'modeTarification',legacy:'mode_tarification',column:'mode_tarification'}, {key:'grilleTarifaire',legacy:'grille_tarifaire',column:'grille_tarifaire'},
+      {key:'services',column:'services'}, {key:'notes',column:'notes'}
+    ], modifiedAt);
+    await this.db.run('UPDATE transport SET ' + update.assignments.join(',') + ' WHERE id=?', [...update.values,id]);
   }
 
   async deleteTransport(id: string) {
+    await this.initDatabase();
     if (this.isWeb) {
+      const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
+      if (commandes.some((c: any) => (c.transport_id ?? c.transportId) === id)) {
+        throw new Error('Suppression refusée : ce transport est associé à une commande.');
+      }
       const transports = JSON.parse(localStorage.getItem('transport') || '[]');
-      const filtered = transports.filter((t: any) => t.id !== id);
-      localStorage.setItem('transport', JSON.stringify(filtered));
+      localStorage.setItem('transport', JSON.stringify(transports.filter((t: any) => t.id !== id)));
     } else {
-      if (!this.db) return;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
+      const refs = await this.db.query('SELECT COUNT(*) AS count FROM commandes WHERE transport_id = ?', [id]);
+      if (Number(refs.values?.[0]?.count ?? 0) > 0) {
+        throw new Error('Suppression refusée : ce transport est associé à une commande.');
+      }
       await this.db.run('DELETE FROM transport WHERE id = ?', [id]);
     }
   }
 
-  // COMMANDES
   async createCommande(commande: any, lignes: any[]) {
+    await this.initDatabase();
+    commande = normalizeCommande(commande);
+    lignes = lignes.map(normalizeCommandeLine);
     if (this.isWeb) {
       const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
-      commandes.push(commande);
-      localStorage.setItem('commandes', JSON.stringify(commandes));
-
       const allLignes = JSON.parse(localStorage.getItem('commande_lignes') || '[]');
+      commandes.push(commande);
       allLignes.push(...lignes.map(l => ({ ...l, commande_id: commande.id })));
-      localStorage.setItem('commande_lignes', JSON.stringify(allLignes));
+      writeWebTransaction(localStorage, [
+        {key:'commandes', value:JSON.stringify(commandes)},
+        {key:'commande_lignes', value:JSON.stringify(allLignes)}
+      ]);
     } else {
-      if (!this.db) return;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       const query = `
         INSERT INTO commandes (id, numero, date_commande, fournisseur_id, transport_id,
                               cout_transport, cout_total, devise, mode_paiement, statut,
                               notes, date_creation, date_modification)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
-      await this.db.run(query, [
-        commande.id, commande.numero, commande.dateCommande, commande.fournisseurId,
-        commande.transportId, commande.coutTransport, commande.coutTotal, commande.devise,
-        commande.modePaiement, commande.statut, commande.notes,
-        commande.dateCreation, commande.dateModification
-      ]);
-
-      for (const ligne of lignes) {
-        await this.db.run(`
-          INSERT INTO commande_lignes (id, commande_id, article_id, quantite, prix_unitaire, devise)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `, [ligne.id, commande.id, ligne.articleId, ligne.quantite, ligne.prixUnitaire, ligne.devise]);
+      await this.db.beginTransaction();
+      try {
+        await this.db.run(query, [
+          commande.id, commande.numero, commande.dateCommande, commande.fournisseurId,
+          commande.transportId, commande.coutTransport, commande.coutTotal, commande.devise,
+          commande.modePaiement, commande.statut, commande.notes,
+          commande.dateCreation, commande.dateModification
+        ], false);
+        for (const ligne of lignes) {
+          await this.db.run(`
+            INSERT INTO commande_lignes (id, commande_id, article_id, quantite, prix_unitaire, devise)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `, [ligne.id, commande.id, ligne.articleId, ligne.quantite, ligne.prixUnitaire, ligne.devise], false);
+        }
+        await this.db.commitTransaction();
+      } catch (error) {
+        await this.db.rollbackTransaction();
+        throw error;
       }
     }
   }
 
   async getCommandes(filters?: any) {
+    await this.initDatabase();
     if (this.isWeb) {
       let commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
       
@@ -484,11 +396,11 @@ class DatabaseService {
         commandes = commandes.filter((c: any) => c.statut === filters.statut);
       }
       
-      return commandes.sort((a: any, b: any) => 
+      return commandes.map(normalizeCommande).sort((a: any, b: any) => 
         new Date(b.dateCommande).getTime() - new Date(a.dateCommande).getTime()
       );
     } else {
-      if (!this.db) return [];
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       let query = 'SELECT * FROM commandes WHERE 1=1';
       const params: any[] = [];
 
@@ -499,11 +411,12 @@ class DatabaseService {
 
       query += ' ORDER BY date_commande DESC';
       const result = await this.db.query(query, params);
-      return result.values || [];
+      return (result.values || []).map(normalizeCommande);
     }
   }
 
   async getCommandeById(id: string) {
+    await this.initDatabase();
     if (this.isWeb) {
       const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
       const commande = commandes.find((c: any) => c.id === id);
@@ -511,87 +424,190 @@ class DatabaseService {
       if (!commande) return null;
 
       const allLignes = JSON.parse(localStorage.getItem('commande_lignes') || '[]');
-      const lignes = allLignes.filter((l: any) => l.commande_id === id);
+      const lignes = allLignes.filter((l: any) => l.commande_id === id || l.commandeId === id).map(normalizeCommandeLine);
 
-      return { ...commande, lignes };
+      return normalizeCommande({ ...commande, lignes });
     } else {
-      if (!this.db) return null;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       const commande = await this.db.query('SELECT * FROM commandes WHERE id = ?', [id]);
       if (!commande.values?.[0]) return null;
 
       const lignes = await this.db.query('SELECT * FROM commande_lignes WHERE commande_id = ?', [id]);
 
       return {
-        ...commande.values[0],
-        lignes: lignes.values || []
+        ...normalizeCommande(commande.values[0]),
+        lignes: (lignes.values || []).map(normalizeCommandeLine)
       };
     }
   }
 
   async updateCommande(id: string, commande: any, lignes?: any[]) {
+    await this.initDatabase();
+    const patch = normalizeCommande(commande);
+    const modifiedAt = new Date().toISOString();
     if (this.isWeb) {
-      const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
-      const index = commandes.findIndex((c: any) => c.id === id);
-      if (index !== -1) {
-        commandes[index] = {
-          ...commande,
-          id,
-          date_modification: new Date().toISOString()
-        };
-        localStorage.setItem('commandes', JSON.stringify(commandes));
+      const commands = JSON.parse(localStorage.getItem('commandes') || '[]');
+      const index = commands.findIndex((item: any) => item.id === id);
+      if (index === -1) return;
+      const nextCommands = [...commands];
+      nextCommands[index] = mergeWebRecord(commands[index], patch, COMMANDE_ALIASES, id, modifiedAt);
+      let nextLines: any[] | undefined;
+      if (lignes !== undefined) {
+        const allLines = JSON.parse(localStorage.getItem('commande_lignes') || '[]');
+        const updatedLines = allLines.filter((line: any) => line.commande_id !== id && line.commandeId !== id);
+        updatedLines.push(...lignes.map(line => ({...normalizeCommandeLine(line), commande_id:id})));
+        nextLines = updatedLines;
       }
-
-      if (lignes) {
-        const allLignes = JSON.parse(localStorage.getItem('commande_lignes') || '[]');
-        const filtered = allLignes.filter((l: any) => l.commande_id !== id);
-        filtered.push(...lignes.map(l => ({ ...l, commande_id: id })));
-        localStorage.setItem('commande_lignes', JSON.stringify(filtered));
-      }
-    } else {
-      if (!this.db) return;
-      const query = `
-        UPDATE commandes SET date_commande=?, fournisseur_id=?, transport_id=?,
-                            cout_transport=?, cout_total=?, devise=?, mode_paiement=?,
-                            statut=?, notes=?, date_modification=?
-        WHERE id=?
-      `;
-      await this.db.run(query, [
-        commande.dateCommande, commande.fournisseurId, commande.transportId,
-        commande.coutTransport, commande.coutTotal, commande.devise,
-        commande.modePaiement, commande.statut, commande.notes,
-        new Date().toISOString(), id
-      ]);
-
-      if (lignes) {
-        await this.db.run('DELETE FROM commande_lignes WHERE commande_id = ?', [id]);
-        for (const ligne of lignes) {
-          await this.db.run(`
-            INSERT INTO commande_lignes (id, commande_id, article_id, quantite, prix_unitaire, devise)
-            VALUES (?, ?, ?, ?, ?, ?)
-          `, [ligne.id, id, ligne.articleId, ligne.quantite, ligne.prixUnitaire, ligne.devise]);
+      const writes = [{key:'commandes', value:JSON.stringify(nextCommands)}];
+      if (nextLines !== undefined) writes.push({key:'commande_lignes', value:JSON.stringify(nextLines)});
+      writeWebTransaction(localStorage, writes);
+      return;
+    }
+    if (!this.db) throw new Error('Connexion SQLite indisponible.');
+    const update = buildSqlUpdate(patch, [
+      {key:'dateCommande',legacy:'date_commande',column:'date_commande'}, {key:'fournisseurId',legacy:'fournisseur_id',column:'fournisseur_id'},
+      {key:'transportId',legacy:'transport_id',column:'transport_id'}, {key:'coutTransport',legacy:'cout_transport',column:'cout_transport'},
+      {key:'coutTotal',legacy:'cout_total',column:'cout_total'}, {key:'devise',column:'devise'},
+      {key:'modePaiement',legacy:'mode_paiement',column:'mode_paiement'}, {key:'statut',column:'statut'}, {key:'notes',column:'notes'}
+    ], modifiedAt);
+    await this.db.beginTransaction();
+    try {
+      await this.db.run('UPDATE commandes SET ' + update.assignments.join(',') + ' WHERE id=?', [...update.values,id], false);
+      if (lignes !== undefined) {
+        await this.db.run('DELETE FROM commande_lignes WHERE commande_id = ?', [id], false);
+        for (const line of lignes) {
+          const item = normalizeCommandeLine(line);
+          await this.db.run('INSERT INTO commande_lignes (id, commande_id, article_id, quantite, prix_unitaire, devise) VALUES (?, ?, ?, ?, ?, ?)',
+            [item.id, id, item.articleId, item.quantite, item.prixUnitaire, item.devise], false);
         }
       }
+      await this.db.commitTransaction();
+    } catch (error) {
+      await this.db.rollbackTransaction();
+      throw error;
     }
   }
 
+  async updateCommandeStatus(id: string, statut: string) {
+    await this.updateCommande(id, {statut});
+  }
+
   async deleteCommande(id: string) {
+    await this.initDatabase();
     if (this.isWeb) {
       const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
-      const filtered = commandes.filter((c: any) => c.id !== id);
-      localStorage.setItem('commandes', JSON.stringify(filtered));
-
       const allLignes = JSON.parse(localStorage.getItem('commande_lignes') || '[]');
-      const filteredLignes = allLignes.filter((l: any) => l.commande_id !== id);
-      localStorage.setItem('commande_lignes', JSON.stringify(filteredLignes));
+      const filtered = commandes.filter((c: any) => c.id !== id);
+      const filteredLignes = allLignes.filter((l: any) => l.commande_id !== id && l.commandeId !== id);
+      writeWebTransaction(localStorage, [
+        {key:'commandes', value:JSON.stringify(filtered)},
+        {key:'commande_lignes', value:JSON.stringify(filteredLignes)}
+      ]);
     } else {
-      if (!this.db) return;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       await this.db.run('DELETE FROM commande_lignes WHERE commande_id = ?', [id]);
       await this.db.run('DELETE FROM commandes WHERE id = ?', [id]);
     }
   }
 
+  /**
+   * Export brut des cinq collections, sans normalisation métier.
+   * Les alias et champs historiques Web sont volontairement conservés.
+   */
+  async exportBackupTables(): Promise<{storage: 'sqlite' | 'localStorage'; tables: Record<TableName, any[]>}> {
+    await this.initDatabase();
+    const tables = {} as Record<TableName, any[]>;
+    if (this.isWeb) {
+      for (const name of TABLE_NAMES) {
+        const raw = localStorage.getItem(name);
+        if (raw === null) throw new Error(`Collection locale absente : ${name}.`);
+        const rows = JSON.parse(raw);
+        if (!Array.isArray(rows)) throw new Error(`Collection locale invalide : ${name}.`);
+        tables[name] = rows;
+      }
+      return {storage: 'localStorage', tables};
+    }
+
+    if (!this.db) throw new Error('Connexion SQLite indisponible.');
+    for (const name of TABLE_NAMES) {
+      const result = await this.db.query(`SELECT * FROM "${name}";`);
+      if (!Array.isArray(result.values)) throw new Error(`Lecture SQLite impossible : ${name}.`);
+      tables[name] = result.values;
+    }
+    const foreignKeys = await this.db.query('PRAGMA foreign_key_check;');
+    if (!Array.isArray(foreignKeys.values) || foreignKeys.values.length !== 0) {
+      throw new Error('La base contient des relations incohérentes. Corrigez-les avant de créer une sauvegarde.');
+    }
+    const integrity = await this.db.query('PRAGMA quick_check;');
+    if (integrity.values?.length !== 1 || Object.values(integrity.values[0] ?? {})[0] !== 'ok') {
+      throw new Error('Le contrôle d’intégrité SQLite a échoué. Aucune sauvegarde n’a été déclarée valide.');
+    }
+    return {storage: 'sqlite', tables};
+  }
+
+  /**
+   * Remplace les cinq collections en une seule opération transactionnelle.
+   * Les données doivent déjà avoir été contrôlées et adaptées au schéma SQLite.
+   */
+  async replaceBackupTables(tables: Record<TableName, any[]>): Promise<void> {
+    await this.initDatabase();
+    for (const name of TABLE_NAMES) {
+      if (!Array.isArray(tables[name])) throw new Error(`Données de restauration invalides : ${name}.`);
+    }
+
+    if (this.isWeb) {
+      writeWebTransaction(localStorage, TABLE_NAMES.map(name => ({
+        key: name,
+        value: JSON.stringify(tables[name])
+      })));
+      return;
+    }
+
+    if (!this.db) throw new Error('Connexion SQLite indisponible.');
+    const deleteOrder: TableName[] = ['commande_lignes', 'commandes', 'articles', 'transport', 'fournisseurs'];
+    const insertOrder: TableName[] = ['fournisseurs', 'transport', 'articles', 'commandes', 'commande_lignes'];
+    const quote = (identifier: string) => '"' + identifier.replace(/"/g, '""') + '"';
+
+    await this.db.beginTransaction();
+    try {
+      for (const name of deleteOrder) {
+        await this.db.run(`DELETE FROM "${name}";`, [], false);
+      }
+
+      for (const name of insertOrder) {
+        for (const row of tables[name]) {
+          const columns = Object.keys(row);
+          if (columns.length === 0 || columns.some(column => !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(column))) {
+            throw new Error(`Colonnes de restauration invalides dans ${name}.`);
+          }
+          const sql = `INSERT INTO "${name}" (${columns.map(quote).join(',')}) VALUES (${columns.map(() => '?').join(',')});`;
+          await this.db.run(sql, columns.map(column => row[column]), false);
+        }
+      }
+
+      const foreignKeys = await this.db.query('PRAGMA foreign_key_check;');
+      if (!Array.isArray(foreignKeys.values) || foreignKeys.values.length !== 0) {
+        throw new Error('La sauvegarde contient des relations incohérentes. La restauration a été annulée.');
+      }
+      const integrity = await this.db.query('PRAGMA quick_check;');
+      if (integrity.values?.length !== 1 || Object.values(integrity.values[0] ?? {})[0] !== 'ok') {
+        throw new Error('Le contrôle d’intégrité SQLite a échoué. La restauration a été annulée.');
+      }
+      await this.db.commitTransaction();
+    } catch (error) {
+      try {
+        const active = await this.db.isTransactionActive();
+        if (active.result === true) await this.db.rollbackTransaction();
+      } catch (rollbackError) {
+        throw new Error('La restauration a échoué et le retour arrière doit être vérifié.', {cause: {error, rollbackError}});
+      }
+      throw error;
+    }
+  }
+
   // STATISTIQUES
   async getStats() {
+    await this.initDatabase();
     if (this.isWeb) {
       const articles = JSON.parse(localStorage.getItem('articles') || '[]');
       const fournisseurs = JSON.parse(localStorage.getItem('fournisseurs') || '[]');
@@ -615,7 +631,7 @@ class DatabaseService {
         totalAchats
       };
     } else {
-      if (!this.db) return null;
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
 
       const articles = await this.db.query('SELECT COUNT(*) as count FROM articles');
       const fournisseurs = await this.db.query('SELECT COUNT(*) as count FROM fournisseurs');
@@ -632,18 +648,20 @@ class DatabaseService {
   }
 
   async getRecentCommandes(limit: number = 5) {
+    await this.initDatabase();
     if (this.isWeb) {
       const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
       return commandes
+        .map(normalizeCommande)
         .sort((a: any, b: any) => new Date(b.dateCommande).getTime() - new Date(a.dateCommande).getTime())
         .slice(0, limit);
     } else {
-      if (!this.db) return [];
+      if (!this.db) throw new Error('Connexion SQLite indisponible.');
       const result = await this.db.query(
         'SELECT * FROM commandes ORDER BY date_commande DESC LIMIT ?',
         [limit]
       );
-      return result.values || [];
+      return (result.values || []).map(normalizeCommande);
     }
   }
 }

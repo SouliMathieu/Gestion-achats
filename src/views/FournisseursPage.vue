@@ -270,8 +270,8 @@ const editFournisseur = (fournisseur: any) => {
     adresse: fournisseur.adresse || '',
     localisation: fournisseur.localisation || '',
     telephone: fournisseur.telephone || '',
-    reseauxSociaux: fournisseur.reseaux_sociaux || '',
-    articlesPrincipaux: fournisseur.articles_principaux || '',
+    reseauxSociaux: fournisseur.reseauxSociaux ?? fournisseur.reseaux_sociaux ?? '',
+    articlesPrincipaux: fournisseur.articlesPrincipaux ?? fournisseur.articles_principaux ?? '',
     notes: fournisseur.notes || ''
   };
   isModalOpen.value = true;
@@ -312,7 +312,7 @@ const saveFournisseur = async () => {
       reseauxSociaux: formData.value.reseauxSociaux,
       articlesPrincipaux: formData.value.articlesPrincipaux,
       notes: formData.value.notes,
-      dateCreation: editingFournisseur.value?.date_creation || new Date().toISOString(),
+      dateCreation: editingFournisseur.value?.dateCreation ?? editingFournisseur.value?.date_creation ?? new Date().toISOString(),
       dateModification: new Date().toISOString()
     };
 
@@ -370,6 +370,12 @@ const deleteFournisseur = async (id: string) => {
     await loadFournisseurs();
   } catch (error) {
     console.error('Erreur suppression:', error);
+    const toast = await toastController.create({
+      message: error instanceof Error ? error.message : 'La suppression a échoué. Aucune donnée n’a été supprimée.',
+      duration: 3500,
+      color: 'danger'
+    });
+    await toast.present();
   }
 };
 

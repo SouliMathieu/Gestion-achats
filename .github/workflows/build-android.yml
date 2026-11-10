@@ -2,7 +2,7 @@ name: Build Android APK & Desktop
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, feat/backup-restore-v2 ]
   workflow_dispatch: {}
 
 jobs:
@@ -27,11 +27,20 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Le package historique "tools" n'existe plus dans le dépôt SDK Google.
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
         env:
           CYPRESS_INSTALL_BINARY: 0
+
+      - name: TypeScript validation
+        run: npx vue-tsc --noEmit
+
+      - name: Unit tests
+        run: npm run test:unit -- --run --threads=false
 
       - name: Build web app
         run: npx vite build

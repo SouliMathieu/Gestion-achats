@@ -282,19 +282,7 @@ const goToTransport = () => {
 
 const updateStatut = async () => {
   try {
-    const commandeData = {
-      dateCommande: commande.value.date_commande || commande.value.dateCommande,
-      fournisseurId: commande.value.fournisseur_id || commande.value.fournisseurId,
-      transportId: commande.value.transport_id || commande.value.transportId,
-      coutTransport: commande.value.cout_transport || commande.value.coutTransport || 0,
-      coutTotal: commande.value.cout_total || commande.value.coutTotal,
-      devise: commande.value.devise,
-      modePaiement: commande.value.mode_paiement || commande.value.modePaiement,
-      statut: nouveauStatut.value,
-      notes: commande.value.notes
-    };
-
-    await DatabaseService.updateCommande(commande.value.id, commandeData);
+    await DatabaseService.updateCommandeStatus(commande.value.id, nouveauStatut.value);
 
     const toast = await toastController.create({
       message: 'Statut mis à jour',

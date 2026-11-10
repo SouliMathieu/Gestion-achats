@@ -369,7 +369,7 @@ const editArticle = (article: any) => {
     couleur: article.couleur || '',
     prix: article.prix,
     devise: article.devise,
-    fournisseurId: article.fournisseur_id || '',
+    fournisseurId: article.fournisseurId ?? article.fournisseur_id ?? '',
     photos: article.photos ? article.photos.split('|||').filter((p: string) => p) : [],
     statut: article.statut,
     notes: article.notes || ''
@@ -461,7 +461,7 @@ const saveArticle = async () => {
       photos: formData.value.photos,
       statut: formData.value.statut,
       notes: formData.value.notes,
-      dateCreation: editingArticle.value?.date_creation || new Date().toISOString(),
+      dateCreation: editingArticle.value?.dateCreation ?? editingArticle.value?.date_creation ?? new Date().toISOString(),
       dateModification: new Date().toISOString()
     };
 
@@ -519,6 +519,12 @@ const deleteArticle = async (id: string) => {
     await loadArticles();
   } catch (error) {
     console.error('Erreur suppression:', error);
+    const toast = await toastController.create({
+      message: error instanceof Error ? error.message : 'La suppression a échoué. Aucune donnée n’a été supprimée.',
+      duration: 3500,
+      color: 'danger'
+    });
+    await toast.present();
   }
 };
 
