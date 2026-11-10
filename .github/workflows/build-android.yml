@@ -46,6 +46,8 @@ jobs:
         run: npx vite build
         env:
           VITE_BUILD_COMMIT: ${{ github.sha }}
+        env:
+          VITE_BUILD_COMMIT: ${{ github.sha }}
 
       - name: Sync Capacitor Android
         run: npx cap sync android
