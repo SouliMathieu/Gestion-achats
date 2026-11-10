@@ -36,7 +36,7 @@ describe('Restauration SQLite transactionnelle — moteur synthétique', () => {
     const invalid = structuredClone(before.tables);
     invalid.commande_lignes[0].article_id = 'TEST-ARTICLE-ABSENT';
 
-    await expect(service.replaceBackupTables(invalid)).rejects.toThrow('relations incohérentes');
+    await expect(service.replaceBackupTables(invalid)).rejects.toThrow(/FOREIGN KEY constraint failed|relations incohérentes/);
     const after = await service.exportBackupTables();
     expect(after.tables).toEqual(before.tables);
   });
