@@ -4,6 +4,7 @@ import { CapacitorSQLite, SQLiteConnection, SQLiteDBConnection } from '@capacito
 import { initializeNativeDatabase, type InitializationReport, type NativeConnections } from './database-initialization';
 import { initializeWebStorage } from './database-web-initialization';
 import { normalizeArticle, normalizeFournisseur, normalizeTransport, normalizeCommande, normalizeCommandeLine, mergeWebRecord, buildSqlUpdate, serializePhotos, ARTICLE_ALIASES, FOURNISSEUR_ALIASES, TRANSPORT_ALIASES, COMMANDE_ALIASES } from './database-models';
+import { writeWebTransaction } from './database-web-transaction';
 
 export class DatabaseService {
   private db: SQLiteDBConnection | null = null;
@@ -325,12 +326,13 @@ export class DatabaseService {
     lignes = lignes.map(normalizeCommandeLine);
     if (this.isWeb) {
       const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
-      commandes.push(commande);
-      localStorage.setItem('commandes', JSON.stringify(commandes));
-
       const allLignes = JSON.parse(localStorage.getItem('commande_lignes') || '[]');
+      commandes.push(commande);
       allLignes.push(...lignes.map(l => ({ ...l, commande_id: commande.id })));
-      localStorage.setItem('commande_lignes', JSON.stringify(allLignes));
+      writeWebTransaction(localStorage, [
+        {key:'commandes', value:JSON.stringify(commandes)},
+        {key:'commande_lignes', value:JSON.stringify(allLignes)}
+      ]);
     } else {
       if (!this.db) throw new Error('Connexion SQLite indisponible.');
       const query = `
@@ -426,8 +428,9 @@ export class DatabaseService {
         updatedLines.push(...lignes.map(line => ({...normalizeCommandeLine(line), commande_id:id})));
         nextLines = updatedLines;
       }
-      localStorage.setItem('commandes', JSON.stringify(nextCommands));
-      if (nextLines !== undefined) localStorage.setItem('commande_lignes', JSON.stringify(nextLines));
+      const writes = [{key:'commandes', value:JSON.stringify(nextCommands)}];
+      if (nextLines !== undefined) writes.push({key:'commande_lignes', value:JSON.stringify(nextLines)});
+      writeWebTransaction(localStorage, writes);
       return;
     }
     if (!this.db) throw new Error('Connexion SQLite indisponible.');
@@ -463,12 +466,13 @@ export class DatabaseService {
     await this.initDatabase();
     if (this.isWeb) {
       const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
-      const filtered = commandes.filter((c: any) => c.id !== id);
-      localStorage.setItem('commandes', JSON.stringify(filtered));
-
       const allLignes = JSON.parse(localStorage.getItem('commande_lignes') || '[]');
-      const filteredLignes = allLignes.filter((l: any) => l.commande_id !== id);
-      localStorage.setItem('commande_lignes', JSON.stringify(filteredLignes));
+      const filtered = commandes.filter((c: any) => c.id !== id);
+      const filteredLignes = allLignes.filter((l: any) => l.commande_id !== id && l.commandeId !== id);
+      writeWebTransaction(localStorage, [
+        {key:'commandes', value:JSON.stringify(filtered)},
+        {key:'commande_lignes', value:JSON.stringify(filteredLignes)}
+      ]);
     } else {
       if (!this.db) throw new Error('Connexion SQLite indisponible.');
       await this.db.run('DELETE FROM commande_lignes WHERE commande_id = ?', [id]);

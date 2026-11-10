@@ -1,8 +1,11 @@
 import { TABLE_NAMES } from './database-schema';
 import { DatabaseInitializationError, type InitializationReport } from './database-initialization';
+import { recoverWebTransaction } from './database-web-transaction';
 
 export function initializeWebStorage(storage: Storage): InitializationReport {
   try {
+    // Recover a write-ahead transaction before inspecting or exposing collections.
+    recoverWebTransaction(storage);
     // Tout lire et valider avant la première écriture. Une exception n'est jamais une absence.
     const existing = TABLE_NAMES.map(name => ({name, raw: storage.getItem(name)}));
     const counts: Record<string, number> = {};
