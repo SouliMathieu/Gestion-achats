@@ -35,7 +35,7 @@ export class DatabaseService {
       const articles = JSON.parse(localStorage.getItem('articles') || '[]');
       articles.push({
         ...article,
-        photos: article.photos?.join('|||')
+        photos: serializePhotos(article.photos)
       });
       localStorage.setItem('articles', JSON.stringify(articles));
     } else {
@@ -48,7 +48,7 @@ export class DatabaseService {
       await this.db.run(query, [
         article.id, article.nom, article.categorie, article.description,
         article.taille, article.couleur, article.prix, article.devise,
-        article.fournisseurId, article.photos?.join('|||'), article.statut,
+        article.fournisseurId, serializePhotos(article.photos), article.statut,
         article.notes, article.dateCreation, article.dateModification
       ]);
     }
@@ -413,7 +413,7 @@ export class DatabaseService {
       if (!commande) return null;
 
       const allLignes = JSON.parse(localStorage.getItem('commande_lignes') || '[]');
-      const lignes = allLignes.filter((l: any) => l.commande_id === id);
+      const lignes = allLignes.filter((l: any) => l.commande_id === id || l.commandeId === id).map(normalizeCommandeLine);
 
       return { ...commande, lignes };
     } else {
@@ -541,6 +541,7 @@ export class DatabaseService {
     if (this.isWeb) {
       const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
       return commandes
+        .map(normalizeCommande)
         .sort((a: any, b: any) => new Date(b.dateCommande).getTime() - new Date(a.dateCommande).getTime())
         .slice(0, limit);
     } else {
@@ -549,7 +550,7 @@ export class DatabaseService {
         'SELECT * FROM commandes ORDER BY date_commande DESC LIMIT ?',
         [limit]
       );
-      return result.values || [];
+      return (result.values || []).map(normalizeCommande);
     }
   }
 }
