@@ -76,9 +76,13 @@ export async function inspectDatabase(db: SQLiteDBConnection, existed: boolean):
     (s.type !== 'table' && s.type !== 'index') || !TABLE_NAMES.includes(s.tbl_name as TableName));
   let kind: SchemaKind;
   if (version > SCHEMA_VERSION || unsupported || !matches) kind = 'unknown';
-  else if (applicationSchema.length === 0) kind = !existed && version === 0 ? 'new' : 'partial';
-  else if (tables.length !== TABLE_NAMES.length) kind = 'partial';
-  else kind = version === 0 ? 'historical' : 'current';
+  else if (tables.length === TABLE_NAMES.length) kind = version === 0 ? 'historical' : 'current';
+  else if (Object.values(counts).every(count => count === 0)) {
+    // Une base existante sans données métier (ou avec seulement un sous-ensemble
+    // exact des tables historiques, toutes vides) peut être initialisée de façon additive.
+    // CREATE TABLE IF NOT EXISTS conserve les tables déjà présentes ; aucun objet n'est supprimé.
+    kind = 'new';
+  } else kind = 'partial';
   return {storage: 'sqlite', kind, version, counts, schema};
 }
 
