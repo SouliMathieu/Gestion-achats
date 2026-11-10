@@ -205,31 +205,41 @@ async function baseline(db: SQLiteDBConnection, sqlite: NativeConnections, exist
 }
 
 export async function initializeNativeDatabase(sqlite: NativeConnections, confirmEmptySchema = false): Promise<{db: SQLiteDBConnection; report: InitializationReport}> {
+  let stage = 'Vérification de l’existence de la base SQLite';
   try {
     const existence = await sqlite.isDatabase(DATABASE_NAME);
-    if (typeof existence.result !== 'boolean') throw new Error('Existence de la base indéterminée.');
+    if (typeof existence.result !== 'boolean') throw new Error('Le plugin SQLite n’a pas retourné un état d’existence exploitable.');
     if (existence.result) {
-      // Un schéma inconnu est refusé avant même l'ouverture en écriture.
+      stage = 'Ouverture de la base existante en lecture seule';
       const probe = await openConnection(sqlite, DATABASE_NAME, true);
       try {
+        stage = 'Inspection du schéma et de l’intégrité SQLite';
         const probeReport = await inspectDatabase(probe, true);
         requireKnown(probeReport);
         if (requiresEmptySchemaConfirmation(probeReport) && !confirmEmptySchema) {
           throw emptySchemaConfirmationError(probeReport);
         }
-      } finally { await sqlite.closeConnection(DATABASE_NAME, true); }
+      } finally {
+        stage = 'Fermeture de la connexion de contrôle SQLite';
+        await sqlite.closeConnection(DATABASE_NAME, true);
+      }
     }
+    stage = 'Ouverture de la base SQLite en lecture-écriture';
     const db = await openConnection(sqlite, DATABASE_NAME, false);
+    stage = 'Inspection de la base SQLite ouverte';
     const inspection = await inspectDatabase(db, existence.result);
     requireKnown(inspection);
     if (requiresEmptySchemaConfirmation(inspection) && !confirmEmptySchema) {
       throw emptySchemaConfirmationError(inspection);
     }
+    stage = 'Protection et vérification du schéma avant initialisation';
     const report = inspection.kind === 'current' ? inspection : await baseline(db, sqlite, existence.result, confirmEmptySchema);
     return {db, report};
   } catch (error) {
     if (error instanceof DatabaseInitializationError) throw error;
+    const detail = error instanceof Error ? error.message : String(error);
     throw new DatabaseInitializationError('INITIALIZATION',
-      'La base de données est indisponible. Aucune réinitialisation automatique ne sera effectuée.', undefined, error);
+      `Échec à l’étape « ${stage} » : ${detail}. Aucune réinitialisation automatique ne sera effectuée.`,
+      undefined, {stage, message: detail, originalError: error});
   }
 }
