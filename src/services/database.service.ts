@@ -341,18 +341,24 @@ export class DatabaseService {
                               notes, date_creation, date_modification)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
-      await this.db.run(query, [
-        commande.id, commande.numero, commande.dateCommande, commande.fournisseurId,
-        commande.transportId, commande.coutTransport, commande.coutTotal, commande.devise,
-        commande.modePaiement, commande.statut, commande.notes,
-        commande.dateCreation, commande.dateModification
-      ]);
-
-      for (const ligne of lignes) {
-        await this.db.run(`
-          INSERT INTO commande_lignes (id, commande_id, article_id, quantite, prix_unitaire, devise)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `, [ligne.id, commande.id, ligne.articleId, ligne.quantite, ligne.prixUnitaire, ligne.devise]);
+      await this.db.beginTransaction();
+      try {
+        await this.db.run(query, [
+          commande.id, commande.numero, commande.dateCommande, commande.fournisseurId,
+          commande.transportId, commande.coutTransport, commande.coutTotal, commande.devise,
+          commande.modePaiement, commande.statut, commande.notes,
+          commande.dateCreation, commande.dateModification
+        ], false);
+        for (const ligne of lignes) {
+          await this.db.run(`
+            INSERT INTO commande_lignes (id, commande_id, article_id, quantite, prix_unitaire, devise)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `, [ligne.id, commande.id, ligne.articleId, ligne.quantite, ligne.prixUnitaire, ligne.devise], false);
+        }
+        await this.db.commitTransaction();
+      } catch (error) {
+        await this.db.rollbackTransaction();
+        throw error;
       }
     }
   }
