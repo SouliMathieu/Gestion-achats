@@ -92,7 +92,8 @@ export function serializePhotos(value: unknown): string | null {
 
 export function normalizeArticle<T extends DataRow = DataRow>(value: unknown): T {
   const normalized = normalizeAliases<T>(value, ARTICLE_ALIASES);
-  if (Array.isArray(normalized.photos)) normalized.photos = serializePhotos(normalized.photos);
+  const row = normalized as DataRow;
+  if (Array.isArray(row.photos)) row.photos = serializePhotos(row.photos);
   return normalized;
 }
 
@@ -110,8 +111,9 @@ export function normalizeCommandeLine<T extends DataRow = DataRow>(value: unknow
 
 export function normalizeCommande<T extends DataRow = DataRow>(value: unknown): T {
   const normalized = normalizeAliases<T>(value, COMMANDE_ALIASES);
-  if (Array.isArray(normalized.lignes)) {
-    normalized.lignes = normalized.lignes.map((line: unknown) => normalizeCommandeLine(line));
+  const row = normalized as DataRow;
+  if (Array.isArray(row.lignes)) {
+    row.lignes = row.lignes.map((line: unknown) => normalizeCommandeLine(line));
   }
   return normalized;
 }

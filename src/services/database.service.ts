@@ -422,8 +422,9 @@ export class DatabaseService {
       let nextLines: any[] | undefined;
       if (lignes !== undefined) {
         const allLines = JSON.parse(localStorage.getItem('commande_lignes') || '[]');
-        nextLines = allLines.filter((line: any) => line.commande_id !== id && line.commandeId !== id);
-        nextLines.push(...lignes.map(line => ({...normalizeCommandeLine(line), commande_id:id})));
+        const updatedLines = allLines.filter((line: any) => line.commande_id !== id && line.commandeId !== id);
+        updatedLines.push(...lignes.map(line => ({...normalizeCommandeLine(line), commande_id:id})));
+        nextLines = updatedLines;
       }
       localStorage.setItem('commandes', JSON.stringify(nextCommands));
       if (nextLines !== undefined) localStorage.setItem('commande_lignes', JSON.stringify(nextLines));

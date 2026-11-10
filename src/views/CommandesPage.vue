@@ -430,28 +430,39 @@ const openAddModal = () => {
 };
 
 const editCommande = async (commande: any) => {
-  editingCommande.value = commande;
   const details = await DatabaseService.getCommandeById(commande.id);
-  
+  if (!details) {
+    editingCommande.value = null;
+    const toast = await toastController.create({
+      message: 'Cette commande n’est plus disponible. La liste a été actualisée.',
+      duration: 3000,
+      color: 'warning'
+    });
+    await toast.present();
+    await loadCommandes();
+    return;
+  }
+
+  editingCommande.value = commande;
   formData.value = {
     numero: details.numero,
-    dateCommande: details.date_commande ? details.date_commande.split('T')[0] : details.dateCommande.split('T')[0],
-    fournisseurId: details.fournisseur_id || details.fournisseurId,
-    transportId: details.transport_id || details.transportId || '',
-    coutTransport: details.cout_transport || details.coutTransport || 0,
+    dateCommande: details.dateCommande?.split('T')[0] ?? '',
+    fournisseurId: details.fournisseurId ?? '',
+    transportId: details.transportId ?? '',
+    coutTransport: details.coutTransport ?? 0,
     devise: details.devise,
-    modePaiement: details.mode_paiement || details.modePaiement || '',
+    modePaiement: details.modePaiement ?? '',
     statut: details.statut,
-    notes: details.notes || '',
-    lignes: details.lignes.map((l: any) => ({
-      id: l.id,
-      articleId: l.article_id || l.articleId,
-      quantite: l.quantite,
-      prixUnitaire: l.prix_unitaire || l.prixUnitaire,
-      devise: l.devise
+    notes: details.notes ?? '',
+    lignes: (details.lignes ?? []).map((line: any) => ({
+      id: line.id,
+      articleId: line.articleId,
+      quantite: line.quantite,
+      prixUnitaire: line.prixUnitaire,
+      devise: line.devise
     }))
   };
-  
+
   isModalOpen.value = true;
 };
 
