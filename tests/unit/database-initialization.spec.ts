@@ -86,7 +86,11 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
       }
       db.close();
       const bytes = readFileSync(harness.path(DATABASE_NAME));
-      await expect(service.initDatabase()).rejects.toMatchObject({code: expect.stringMatching(/^SCHEMA_/)});
+      if (variation === 'missing-table') {
+        await expect(service.initDatabase()).rejects.toMatchObject({code: 'EMPTY_DATABASE_CONFIRMATION'});
+      } else {
+        await expect(service.initDatabase()).rejects.toMatchObject({code: 'SCHEMA_UNKNOWN'});
+      }
       expect(readFileSync(harness.path(DATABASE_NAME))).toEqual(bytes);
       expect(harness.events.some(e => e.name === DATABASE_NAME && !e.readonly)).toBe(false);
       expect(directory).toBeTruthy();
@@ -150,8 +154,12 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
     db.close();
 
     const before = readFileSync(join(directory, DATABASE_NAME + '.db'));
-    await expect(service.initDatabase()).rejects.toMatchObject({code: 'SCHEMA_PARTIAL'});
+    await expect(service.initDatabase()).rejects.toMatchObject({code: 'EMPTY_DATABASE_CONFIRMATION'});
     expect(readFileSync(join(directory, DATABASE_NAME + '.db'))).toEqual(before);
+    const report = await service.confirmEmptyDatabaseInitialization();
+    expect(report.version).toBe(1);
+    expect(rawSnapshot(directory).data.transport).toEqual([]);
+    expect(rawSnapshot(directory).data.fournisseurs).toEqual([]);
   });
 
   it('reconnaît android_metadata sans perdre ses informations', async () => {
