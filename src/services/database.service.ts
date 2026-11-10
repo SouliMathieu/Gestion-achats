@@ -102,33 +102,24 @@ export class DatabaseService {
 
   async updateArticle(id: string, article: any) {
     await this.initDatabase();
+    const patch = normalizeArticle(article);
+    const modifiedAt = new Date().toISOString();
     if (this.isWeb) {
-      const articles = JSON.parse(localStorage.getItem('articles') || '[]');
-      const index = articles.findIndex((a: any) => a.id === id);
-      if (index !== -1) {
-        articles[index] = {
-          ...article,
-          id,
-          photos: article.photos?.join('|||'),
-          date_modification: new Date().toISOString()
-        };
-        localStorage.setItem('articles', JSON.stringify(articles));
-      }
-    } else {
-      if (!this.db) throw new Error('Connexion SQLite indisponible.');
-      const query = `
-        UPDATE articles SET nom=?, categorie=?, description=?, taille=?, couleur=?, 
-                           prix=?, devise=?, fournisseur_id=?, photos=?, statut=?, 
-                           notes=?, date_modification=?
-        WHERE id=?
-      `;
-      await this.db.run(query, [
-        article.nom, article.categorie, article.description, article.taille,
-        article.couleur, article.prix, article.devise, article.fournisseurId,
-        article.photos?.join('|||'), article.statut, article.notes,
-        new Date().toISOString(), id
-      ]);
+      const records = JSON.parse(localStorage.getItem('articles') || '[]');
+      const index = records.findIndex((item: any) => item.id === id);
+      if (index === -1) return;
+      records[index] = mergeWebRecord(records[index], patch, ARTICLE_ALIASES, id, modifiedAt);
+      localStorage.setItem('articles', JSON.stringify(records));
+      return;
     }
+    if (!this.db) throw new Error('Connexion SQLite indisponible.');
+    const update = buildSqlUpdate(patch, [
+      {key:'nom',column:'nom'}, {key:'categorie',column:'categorie'}, {key:'description',column:'description'},
+      {key:'taille',column:'taille'}, {key:'couleur',column:'couleur'}, {key:'prix',column:'prix'},
+      {key:'devise',column:'devise'}, {key:'fournisseurId',legacy:'fournisseur_id',column:'fournisseur_id'},
+      {key:'photos',column:'photos',transform:serializePhotos}, {key:'statut',column:'statut'}, {key:'notes',column:'notes'}
+    ], modifiedAt);
+    await this.db.run('UPDATE articles SET ' + update.assignments.join(',') + ' WHERE id=?', [...update.values,id]);
   }
 
   async deleteArticle(id: string) {
@@ -432,49 +423,51 @@ export class DatabaseService {
 
   async updateCommande(id: string, commande: any, lignes?: any[]) {
     await this.initDatabase();
+    const patch = normalizeCommande(commande);
+    const modifiedAt = new Date().toISOString();
     if (this.isWeb) {
-      const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
-      const index = commandes.findIndex((c: any) => c.id === id);
-      if (index !== -1) {
-        commandes[index] = {
-          ...commande,
-          id,
-          date_modification: new Date().toISOString()
-        };
-        localStorage.setItem('commandes', JSON.stringify(commandes));
+      const commands = JSON.parse(localStorage.getItem('commandes') || '[]');
+      const index = commands.findIndex((item: any) => item.id === id);
+      if (index === -1) return;
+      const nextCommands = [...commands];
+      nextCommands[index] = mergeWebRecord(commands[index], patch, COMMANDE_ALIASES, id, modifiedAt);
+      let nextLines: any[] | undefined;
+      if (lignes !== undefined) {
+        const allLines = JSON.parse(localStorage.getItem('commande_lignes') || '[]');
+        nextLines = allLines.filter((line: any) => line.commande_id !== id && line.commandeId !== id);
+        nextLines.push(...lignes.map(line => ({...normalizeCommandeLine(line), commande_id:id})));
       }
-
-      if (lignes) {
-        const allLignes = JSON.parse(localStorage.getItem('commande_lignes') || '[]');
-        const filtered = allLignes.filter((l: any) => l.commande_id !== id);
-        filtered.push(...lignes.map(l => ({ ...l, commande_id: id })));
-        localStorage.setItem('commande_lignes', JSON.stringify(filtered));
-      }
-    } else {
-      if (!this.db) throw new Error('Connexion SQLite indisponible.');
-      const query = `
-        UPDATE commandes SET date_commande=?, fournisseur_id=?, transport_id=?,
-                            cout_transport=?, cout_total=?, devise=?, mode_paiement=?,
-                            statut=?, notes=?, date_modification=?
-        WHERE id=?
-      `;
-      await this.db.run(query, [
-        commande.dateCommande, commande.fournisseurId, commande.transportId,
-        commande.coutTransport, commande.coutTotal, commande.devise,
-        commande.modePaiement, commande.statut, commande.notes,
-        new Date().toISOString(), id
-      ]);
-
-      if (lignes) {
-        await this.db.run('DELETE FROM commande_lignes WHERE commande_id = ?', [id]);
-        for (const ligne of lignes) {
-          await this.db.run(`
-            INSERT INTO commande_lignes (id, commande_id, article_id, quantite, prix_unitaire, devise)
-            VALUES (?, ?, ?, ?, ?, ?)
-          `, [ligne.id, id, ligne.articleId, ligne.quantite, ligne.prixUnitaire, ligne.devise]);
+      localStorage.setItem('commandes', JSON.stringify(nextCommands));
+      if (nextLines !== undefined) localStorage.setItem('commande_lignes', JSON.stringify(nextLines));
+      return;
+    }
+    if (!this.db) throw new Error('Connexion SQLite indisponible.');
+    const update = buildSqlUpdate(patch, [
+      {key:'dateCommande',legacy:'date_commande',column:'date_commande'}, {key:'fournisseurId',legacy:'fournisseur_id',column:'fournisseur_id'},
+      {key:'transportId',legacy:'transport_id',column:'transport_id'}, {key:'coutTransport',legacy:'cout_transport',column:'cout_transport'},
+      {key:'coutTotal',legacy:'cout_total',column:'cout_total'}, {key:'devise',column:'devise'},
+      {key:'modePaiement',legacy:'mode_paiement',column:'mode_paiement'}, {key:'statut',column:'statut'}, {key:'notes',column:'notes'}
+    ], modifiedAt);
+    await this.db.beginTransaction();
+    try {
+      await this.db.run('UPDATE commandes SET ' + update.assignments.join(',') + ' WHERE id=?', [...update.values,id], false);
+      if (lignes !== undefined) {
+        await this.db.run('DELETE FROM commande_lignes WHERE commande_id = ?', [id], false);
+        for (const line of lignes) {
+          const item = normalizeCommandeLine(line);
+          await this.db.run('INSERT INTO commande_lignes (id, commande_id, article_id, quantite, prix_unitaire, devise) VALUES (?, ?, ?, ?, ?, ?)',
+            [item.id, id, item.articleId, item.quantite, item.prixUnitaire, item.devise], false);
         }
       }
+      await this.db.commitTransaction();
+    } catch (error) {
+      await this.db.rollbackTransaction();
+      throw error;
     }
+  }
+
+  async updateCommandeStatus(id: string, statut: string) {
+    await this.updateCommande(id, {statut});
   }
 
   async deleteCommande(id: string) {
