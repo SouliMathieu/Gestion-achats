@@ -34,7 +34,10 @@ export class DatabaseService {
   // Initialisation explicite d'une base existante, reconnue vide après inspection.
   // La promesse initiale rejetée n'est remplacée qu'après confirmation de l'écran de démarrage.
   async confirmEmptyDatabaseInitialization(): Promise<InitializationReport> {
-    if (this.isWeb) throw new Error('Cette confirmation ne concerne que le stockage SQLite natif.');
+    if (this.isWeb) throw Object.assign(
+      new Error('Cette confirmation ne concerne que le stockage SQLite natif.'),
+      {code: 'WEB_STORAGE'}
+    );
     if (!this.initialization) throw new Error('Aucune demande de confirmation en attente.');
     try {
       await this.initialization;
