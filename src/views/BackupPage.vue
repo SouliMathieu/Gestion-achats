@@ -129,8 +129,10 @@ const createAndExport = async () => {
   busy.value = true;
   try {
     const doc = await backupService.createBackup();
-    await backupService.exportFile(doc);
-    await notify('Sauvegarde vérifiée. Le téléchargement a été lancé.');
+    const result = await backupService.exportFile(doc);
+    if (result === 'shared') await notify('Sauvegarde vérifiée et partagée.');
+    else if (result === 'downloaded') await notify('Sauvegarde vérifiée. Le téléchargement a été lancé.');
+    else await notify('Export annulé. Aucune donnée n’a été modifiée.', 'warning');
   } catch (error) {
     await notify(error instanceof Error ? error.message : 'Impossible de créer la sauvegarde.', 'danger');
   } finally { busy.value = false; }

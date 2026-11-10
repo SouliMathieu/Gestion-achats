@@ -50,6 +50,18 @@ export function writeWebTransaction(storage: Storage, writes: WebStorageWrite[])
   const journal: WebStorageJournal = {version: 1, writes};
   const serialized = JSON.stringify(journal);
   parseJournal(serialized); // Validate before writing the journal or changing business data.
+  // localStorage quotas are small and the journal temporarily duplicates the new payload.
+  // Refuse oversized transactions before touching any collection.
+  let existingChars = 0;
+  for (let i = 0; i < storage.length; i++) {
+    const key = storage.key(i);
+    if (key !== null) existingChars += key.length + (storage.getItem(key)?.length ?? 0);
+  }
+  const nextChars = writes.reduce((sum, write) => sum + write.key.length + (write.value?.length ?? 0), 0);
+  const estimatedBytes = (Math.max(existingChars, nextChars) + JOURNAL_KEY.length + serialized.length) * 2;
+  if (estimatedBytes > 4 * 1024 * 1024) {
+    throw new Error('Transaction trop volumineuse pour le stockage local du navigateur. Exportez les données et libérez de l’espace avant de réessayer.');
+  }
   storage.setItem(JOURNAL_KEY, serialized);
   if (storage.getItem(JOURNAL_KEY) !== serialized) {
     throw new Error('Le journal de transaction n’a pas pu être persisté ; aucune donnée métier n’a été modifiée.');

@@ -237,9 +237,21 @@ export class BackupService {
     return this.validateBackup(parsed);
   }
 
-  async exportFile(doc: BackupDocument): Promise<void> {
-    const blob = new Blob([JSON.stringify(doc, null, 2)], {type:'application/json'});
+  async exportFile(doc: BackupDocument): Promise<'shared' | 'downloaded' | 'cancelled'> {
+    const content = JSON.stringify(doc, null, 2);
+    const blob = new Blob([content], {type:'application/json'});
     const filename = 'afriki-achats-backup-' + doc.createdAt.replace(/[:.]/g,'-') + '.json';
+    const file = new File([blob], filename, {type:'application/json'});
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function' &&
+      typeof navigator.canShare === 'function' && navigator.canShare({files:[file]})) {
+      try {
+        await navigator.share({files:[file],title:'Sauvegarde Afriki Achats',text:'Copie de sauvegarde de vos données.'});
+        return 'shared';
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return 'cancelled';
+        throw error;
+      }
+    }
     const url = URL.createObjectURL(blob);
     try {
       const anchor = document.createElement('a');
@@ -249,6 +261,7 @@ export class BackupService {
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
+      return 'downloaded';
     } finally {
       window.setTimeout(() => URL.revokeObjectURL(url), 30000);
     }
