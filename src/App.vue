@@ -20,9 +20,9 @@
             </section>
             <p>Aucune réinitialisation automatique n’est effectuée. Ne désinstallez pas l’application et ne videz pas son stockage.</p>
             <template v-if="databaseNeedsConfirmation">
-              <p>La base existe, mais son schéma est absent ou incomplet et les tables reconnues ne contiennent aucune donnée. Cette opération ajoutera uniquement les tables manquantes ; elle ne supprimera aucune table ni donnée existante.</p>
+              <p>La structure SQLite est incomplète. Une copie de protection sera créée et vérifiée avant l’ajout des tables manquantes. Les tables et enregistrements existants seront contrôlés avant validation. En cas d’échec, la transaction sera annulée.</p>
               <ion-button :disabled="confirmingDatabase" @click="confirmEmptyDatabase">
-                {{ confirmingDatabase ? 'Initialisation…' : 'Confirmer l’initialisation' }}
+                {{ confirmingDatabase ? 'Protection et réparation…' : 'Protéger et compléter la base' }}
               </ion-button>
             </template>
             <ion-button v-else @click="reloadApplication">Réessayer l’ouverture</ion-button>
@@ -91,7 +91,8 @@ const confirmEmptyDatabase = async () => {
     });
   } catch (error) {
     databaseError.value = error instanceof Error ? error.message : 'L’initialisation confirmée a échoué.';
-    databaseNeedsConfirmation.value = false;
+    databaseNeedsConfirmation.value = error instanceof DatabaseInitializationError &&
+      (error.code === 'EMPTY_DATABASE_CONFIRMATION' || error.code === 'SCHEMA_COMPLETION_CONFIRMATION');
   } finally {
     confirmingDatabase.value = false;
   }
@@ -119,7 +120,7 @@ onMounted(async () => {
       databaseDiagnostic.value = {code: 'UNEXPECTED', version: null};
     }
     databaseNeedsConfirmation.value = error instanceof DatabaseInitializationError &&
-      error.code === 'EMPTY_DATABASE_CONFIRMATION';
+      (error.code === 'EMPTY_DATABASE_CONFIRMATION' || error.code === 'SCHEMA_COMPLETION_CONFIRMATION');
     databaseState.value = 'error';
   }
 });
