@@ -14,7 +14,7 @@ export class NativeHarness {
   connections = new Map<string, NativeDatabase>();
   events: Event[] = [];
   hook?: (event: Event) => void;
-  constructor(public directory: string) {}
+  constructor(public directory: string, public initialSynchronous?: number) {}
   path(name: string) { return join(this.directory, name + '.db'); }
   emit(event: Event) { this.events.push(event); this.hook?.(event); }
   api: NativeConnections = {
@@ -48,6 +48,9 @@ class NativeDatabase {
     this.event('before', 'open');
     this.handle = new DatabaseSync(this.harness.path(this.name), {readOnly: this.readonly});
     this.handle.exec('PRAGMA foreign_keys = ON;');
+    if (this.harness.initialSynchronous !== undefined) {
+      this.handle.exec(`PRAGMA synchronous = ${this.harness.initialSynchronous};`);
+    }
     this.event('after', 'open');
   }
   async close() { this.handle?.close(); this.handle = undefined; }
@@ -83,6 +86,9 @@ class NativeDatabase {
 export function seed(directory: string, version = 0) {
   const db = new DatabaseSync(join(directory, 'gestion_achats.db'));
   db.exec(readFileSync(new URL('../fixtures/historical-schema.sql', import.meta.url), 'utf8'));
+  if (version >= 2) {
+    db.exec('ALTER TABLE commandes ADD COLUMN archivee INTEGER NOT NULL DEFAULT 0; ALTER TABLE commandes ADD COLUMN date_archivage TEXT;');
+  }
   // Chaque colonne reçoit une valeur synthétique, y compris les champs facultatifs et photos.
   const ids: Record<string, string> = {articles: 'TEST-ARTICLE', fournisseurs: 'TEST-FOURNISSEUR',
     transport: 'TEST-TRANSPORT', commandes: 'TEST-COMMANDE', commande_lignes: 'TEST-LIGNE'};
@@ -90,6 +96,8 @@ export function seed(directory: string, version = 0) {
     const columns = db.prepare(`PRAGMA table_info(${table})`).all();
     const values = columns.map((c: any) => {
       if (c.name === 'id') return ids[table];
+      if (c.name === 'archivee') return 0;
+      if (c.name === 'date_archivage') return null;
       if (c.name === 'fournisseur_id') return ids.fournisseurs;
       if (c.name === 'transport_id') return ids.transport;
       if (c.name === 'commande_id') return ids.commandes;
@@ -114,8 +122,11 @@ export function rawSnapshot(directory: string) {
   const db = new DatabaseSync(join(directory, 'gestion_achats.db'));
   try {
     const schema = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all();
-    const data = Object.fromEntries(schema.filter((s: any) => s.type === 'table').map((s: any) =>
-      [s.name, db.prepare(`SELECT * FROM "${s.name}" ORDER BY id`).all().map((row: object) => ({...row}))]));
+    const data = Object.fromEntries(schema.filter((s: any) => s.type === 'table').map((s: any) => {
+      const columns = db.prepare(`PRAGMA table_info("${s.name}")`).all();
+      const orderById = columns.some((column: any) => column.name === 'id') ? ' ORDER BY "id"' : '';
+      return [s.name, db.prepare(`SELECT * FROM "${s.name}"${orderById}`).all().map((row: object) => ({...row}))];
+    }));
     return {version: db.prepare('PRAGMA user_version').get().user_version, schema, data};
   } finally { db.close(); }
 }

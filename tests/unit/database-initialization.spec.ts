@@ -9,10 +9,10 @@ import { PROTECTION_DATABASE } from '../../src/services/database-migration-prote
 import { NativeHarness, DatabaseSync, rawSnapshot, seed } from '../helpers/native-sqlite';
 
 const harnesses: NativeHarness[] = [];
-function setup(version?: number) {
+function setup(version?: number, initialSynchronous?: number) {
   const directory = mkdtempSync(join(tmpdir(), 'gestion-phase1-'));
   if (version !== undefined) seed(directory, version);
-  const harness = new NativeHarness(directory);
+  const harness = new NativeHarness(directory, initialSynchronous);
   harnesses.push(harness);
   return {directory, harness, service: new DatabaseService({sqlite: harness.api, platform: 'android'})};
 }
@@ -32,7 +32,7 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
   });
 
   it.each([false, true])('réutilise une connexion enregistrée, déjà ouverte=%s', async opened => {
-    const {service, harness} = setup(1);
+    const {service, harness} = setup(2);
     const db = await harness.api.createConnection(DATABASE_NAME, false, 'no-encryption', 1, false);
     if (opened) await db.open();
     const report = await service.initDatabase();
@@ -45,18 +45,42 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
   it('crée une base réellement absente et vérifie ses cinq tables en version 1', async () => {
     const {service, directory} = setup();
     const report = await service.initDatabase();
-    expect(report).toMatchObject({kind: 'new', version: 1});
+    expect(report).toMatchObject({kind: 'new', version: 2});
     expect(Object.values(report.counts)).toEqual([0, 0, 0, 0, 0]);
     expect(Object.keys(rawSnapshot(directory).data)).toHaveLength(5);
+  });
+
+  it('force synchronous FULL avant la transaction lorsque SQLite démarre en NORMAL', async () => {
+    const {service, harness} = setup(0, 1);
+    const report = await service.initDatabase();
+    expect(report.kind).toBe('historical');
+
+    const configureIndex = harness.events.findIndex(event =>
+      event.name === DATABASE_NAME && event.method === 'execute' &&
+      event.sql?.trim().toUpperCase() === 'PRAGMA SYNCHRONOUS = FULL;');
+    const transactionIndex = harness.events.findIndex(event =>
+      event.name === DATABASE_NAME && event.method === 'begin');
+    expect(configureIndex).toBeGreaterThanOrEqual(0);
+    expect(configureIndex).toBeLessThan(transactionIndex);
+    const verified = harness.events.some(event =>
+      event.name === DATABASE_NAME && event.method === 'query' &&
+      event.sql?.trim().toUpperCase() === 'PRAGMA SYNCHRONOUS;');
+    expect(verified).toBe(true);
   });
 
   it('protège la base historique version 0, conserve chaque champ et ne modifie que sa version', async () => {
     const {service, directory, harness} = setup(0);
     const before = rawSnapshot(directory);
     const report = await service.initDatabase();
-    expect(report).toMatchObject({kind: 'historical', version: 1});
+    expect(report).toMatchObject({kind: 'historical', version: 2});
     expect(report.protectionId).toBeTruthy();
-    expect(rawSnapshot(directory)).toEqual({...before, version: 1});
+    const migrated = rawSnapshot(directory);
+    expect(migrated.version).toBe(2);
+    expect(migrated.data.articles).toEqual(before.data.articles);
+    expect(migrated.data.fournisseurs).toEqual(before.data.fournisseurs);
+    expect(migrated.data.transport).toEqual(before.data.transport);
+    expect(migrated.data.commande_lignes).toEqual(before.data.commande_lignes);
+    expect(migrated.data.commandes[0]).toMatchObject({...before.data.commandes[0], archivee:0, date_archivage:null});
     const guard = new DatabaseSync(harness.path(PROTECTION_DATABASE), {readOnly: true});
     try {
       const row = guard.prepare('SELECT * FROM protections').get();
@@ -96,21 +120,32 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
       expect(directory).toBeTruthy();
     });
 
-  it('exige une confirmation avant de créer les tables dans une base existante vide', async () => {
+  it('initialise automatiquement un fichier SQLite existant sans aucune table métier', async () => {
     const {service, directory, harness} = setup(0);
     const db = new DatabaseSync(harness.path(DATABASE_NAME));
-    db.exec('PRAGMA foreign_keys=OFF; DROP TABLE commande_lignes; DROP TABLE commandes; DROP TABLE articles; DROP TABLE fournisseurs; DROP TABLE transport;');
+    db.exec("PRAGMA foreign_keys=OFF; DROP TABLE commande_lignes; DROP TABLE commandes; DROP TABLE articles; DROP TABLE fournisseurs; DROP TABLE transport; CREATE TABLE android_metadata(locale TEXT); INSERT INTO android_metadata VALUES ('fr_FR');");
     db.close();
 
-    const before = readFileSync(harness.path(DATABASE_NAME));
-    await expect(service.initDatabase()).rejects.toMatchObject({code: 'EMPTY_DATABASE_CONFIRMATION'});
-    expect(readFileSync(harness.path(DATABASE_NAME))).toEqual(before);
-    expect(harness.events.some(e => e.name === DATABASE_NAME && e.method === 'execute' && e.sql?.includes('CREATE TABLE'))).toBe(false);
-
-    const report = await service.confirmEmptyDatabaseInitialization();
-    expect(report).toMatchObject({kind: 'empty-existing', version: 1});
+    const report = await service.initDatabase();
+    expect(report).toMatchObject({kind: 'empty-existing', version: 2});
     expect(Object.values(report.counts)).toEqual([0, 0, 0, 0, 0]);
-    expect(Object.keys(rawSnapshot(directory).data).sort()).toEqual(['articles', 'commande_lignes', 'commandes', 'fournisseurs', 'transport']);
+    expect(Object.keys(rawSnapshot(directory).data).sort()).toEqual(['android_metadata', 'articles', 'commande_lignes', 'commandes', 'fournisseurs', 'transport']);
+    expect(rawSnapshot(directory).data.android_metadata).toEqual([{locale: 'fr_FR'}]);
+    expect(harness.events.some(e => e.name === PROTECTION_DATABASE)).toBe(false);
+  });
+
+  it('initialise un fichier existant vide même si SQLite démarre en NORMAL, sans exiger la base de protection', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'gestion-empty-normal-'));
+    const harness = new NativeHarness(directory, 1);
+    harnesses.push(harness);
+    const empty = new DatabaseSync(harness.path(DATABASE_NAME));
+    empty.close();
+    const service = new DatabaseService({sqlite: harness.api, platform: 'android'});
+
+    const report = await service.initDatabase();
+    expect(report).toMatchObject({kind: 'empty-existing', version: 2});
+    expect(Object.values(report.counts)).toEqual([0, 0, 0, 0, 0]);
+    expect(harness.events.some(e => e.name === PROTECTION_DATABASE)).toBe(false);
   });
 
   it.each([0, 1])('demande confirmation puis complète uniquement les tables manquantes d’un schéma vide (version %s)', async version => {
@@ -135,7 +170,7 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
     expect(rawSnapshot(directory)).toEqual(before);
 
     const report = await service.confirmEmptyDatabaseInitialization();
-    expect(report).toMatchObject({kind: 'partial-empty', version: 1});
+    expect(report).toMatchObject({kind: 'partial-empty', version: 2});
     expect(Object.values(report.counts)).toEqual([0, 0, 0, 0, 0]);
     expect(Object.keys(rawSnapshot(directory).data).sort()).toEqual(['articles', 'commande_lignes', 'commandes', 'fournisseurs', 'transport']);
     expect(rawSnapshot(directory).data.transport).toEqual(before.data.transport);
@@ -157,7 +192,7 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
     await expect(service.initDatabase()).rejects.toMatchObject({code: 'EMPTY_DATABASE_CONFIRMATION'});
     expect(rawSnapshot(directory)).toEqual(before);
     const report = await service.confirmEmptyDatabaseInitialization();
-    expect(report.version).toBe(1);
+    expect(report.version).toBe(2);
     expect(rawSnapshot(directory).data.transport).toEqual(before.data.transport);
     expect(rawSnapshot(directory).data.fournisseurs).toEqual(before.data.fournisseurs);
     expect(rawSnapshot(directory).data.articles).toEqual([]);

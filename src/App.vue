@@ -13,6 +13,8 @@
             <section v-if="databaseDiagnostic" class="database-diagnostic">
               <p><strong>Diagnostic technique</strong></p>
               <p>Code : {{ databaseDiagnostic.code }}</p>
+              <p v-if="databaseDiagnostic.stage">Étape : {{ databaseDiagnostic.stage }}</p>
+              <p v-if="databaseDiagnostic.cause">Cause : {{ databaseDiagnostic.cause }}</p>
               <p v-if="databaseDiagnostic.kind">Schéma détecté : {{ databaseDiagnostic.kind }}</p>
               <p v-if="databaseDiagnostic.version !== null">Version SQLite : {{ databaseDiagnostic.version }}</p>
               <p v-if="databaseDiagnostic.counts">Tables et enregistrements : {{ databaseDiagnostic.counts }}</p>
@@ -66,17 +68,82 @@
 import { IonApp, IonRouterOutlet, IonTabs, IonTabBar, IonTabButton, IonIcon, IonLabel, IonPage, IonContent, IonSpinner, IonButton } from '@ionic/vue';
 import { pieChartOutline, cubeOutline, storefrontOutline, airplaneOutline, cartOutline } from 'ionicons/icons';
 import { onMounted, ref } from 'vue';
+import { useBackButton } from '@ionic/vue';
+import { useRouter } from 'vue-router';
+import { App as CapacitorApp } from '@capacitor/app';
 import DatabaseService from '@/services/database.service';
 import { DatabaseInitializationError } from '@/services/database-initialization';
 import { backupService } from '@/services/backup.service';
 
+const router = useRouter();
 const databaseState = ref<'loading' | 'ready' | 'error'>('loading');
 const databaseError = ref('');
-const databaseDiagnostic = ref<{code: string; kind?: string; version: number | null; counts?: string} | null>(null);
+const databaseDiagnostic = ref<{code: string; stage?: string; cause?: string; kind?: string; version: number | null; counts?: string} | null>(null);
 const buildCommit = import.meta.env.VITE_BUILD_COMMIT || 'non renseigné';
 const databaseNeedsConfirmation = ref(false);
 const confirmingDatabase = ref(false);
 const reloadApplication = () => window.location.reload();
+useBackButton(-1, () => {
+  const overlay = document.querySelector('ion-modal.show-modal, ion-alert.show, ion-action-sheet.show, ion-popover.show, ion-picker.show, ion-loading.show');
+  if (overlay) return;
+  if (router.currentRoute.value.path !== '/dashboard') {
+    if (window.history.length > 1) router.back(); else void router.replace('/dashboard');
+    return;
+  }
+  void CapacitorApp.exitApp();
+});
+
+function describeOriginalError(value: unknown, depth = 0): string {
+  if (value === null || value === undefined) return '';
+  if (depth > 3) return 'Détails supplémentaires indisponibles';
+
+  const safeMessage = (message: string, name = 'Erreur technique'): string => {
+    const normalized = message.trim().replace(/^SQLite(?: error)?\s*:\s*/i, '');
+    const knownSqliteErrors = [
+      /^no such table: [a-zA-Z_][a-zA-Z0-9_]*$/i,
+      /^no such column: [a-zA-Z_][a-zA-Z0-9_]*$/i,
+      /^database is locked$/i,
+      /^attempt to write a readonly database$/i,
+      /^unable to open database file$/i,
+      /^file is not a database$/i,
+      /^database disk image is malformed$/i,
+      /^disk I\/O error$/i,
+      /^database or disk is full$/i,
+      /^foreign key constraint failed$/i,
+      /^unique constraint failed: [a-zA-Z_][a-zA-Z0-9_.]*(?:, [a-zA-Z_][a-zA-Z0-9_.]*)*$/i,
+      /^not null constraint failed: [a-zA-Z_][a-zA-Z0-9_.]*$/i,
+      /^check constraint failed(?: \([a-zA-Z_][a-zA-Z0-9_]*\))?$/i,
+      /^cannot start a transaction within a transaction$/i,
+      /^cannot commit - no transaction is active$/i,
+      /^cannot rollback - no transaction is active$/i,
+      /^sqlite_busy(?:_\w+)?$/i,
+      /^sqlite_locked(?:_\w+)?$/i,
+      /^sqlite_cantopen(?:_\w+)?$/i,
+      /^sqlite_corrupt(?:_\w+)?$/i,
+      /^sqlite_full$/i,
+      /^sqlite_ioerr(?:_\w+)?$/i
+    ];
+    if (knownSqliteErrors.some(pattern => pattern.test(normalized))) {
+      return `SQLite : ${normalized}`;
+    }
+    return `${name} — détail masqué pour protéger les données.`;
+  };
+
+  if (value instanceof Error) return safeMessage(value.message, value.name);
+  if (typeof value === 'string') return safeMessage(value);
+  if (typeof value !== 'object') return 'Erreur technique — détail masqué pour protéger les données.';
+
+  const item = value as Record<string, unknown>;
+  const parts: string[] = [];
+  if (typeof item.message === 'string' && item.message) parts.push(safeMessage(item.message));
+  for (const key of ['originalError', 'cause', 'error', 'rollbackError']) {
+    if (item[key] !== undefined) {
+      const detail = describeOriginalError(item[key], depth + 1);
+      if (detail && !parts.includes(detail)) parts.push(detail);
+    }
+  }
+  return parts.join(' → ').slice(0, 900);
+}
 
 const confirmEmptyDatabase = async () => {
   if (confirmingDatabase.value) return;
@@ -112,6 +179,10 @@ onMounted(async () => {
       const report = error.report;
       databaseDiagnostic.value = {
         code: error.code,
+        stage: error.originalError && typeof error.originalError === 'object' &&
+          typeof (error.originalError as Record<string, unknown>).stage === 'string'
+          ? String((error.originalError as Record<string, unknown>).stage) : undefined,
+        cause: describeOriginalError(error.originalError),
         kind: report?.kind,
         version: report?.version ?? null,
         counts: report ? JSON.stringify(report.counts) : undefined

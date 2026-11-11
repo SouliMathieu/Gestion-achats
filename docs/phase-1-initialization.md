@@ -1,8 +1,6 @@
 # Phase 1 — Initialisation et reconnaissance du schéma
 
-Base de travail : `6efaa0ce7da76fee119376126862c9066e6ad336`, branche `feat/backup-restore-v2`.
-Implémentation proposée pour revue, sans commit ni push. Aucun fichier natif, identifiant,
-paramètre de signature, manifeste de dépendances ou workflow n'a été modifié.
+Base de travail : branche `feat/backup-restore-v2`. La phase 1 est intégrée et complétée par le schéma v2 décrit ci-dessous. L’APK final reste réservé au test global.
 
 ## Comportement
 
@@ -31,7 +29,7 @@ L'inspection contrôle `quick_check`, la version, `sqlite_master`, les colonnes,
 | Fichier absent ou base sans table métier, version 0 ou 1 | Création transactionnelle des cinq tables historiques et version 1 |
 | Schéma historique complet, version 0 | Protection indépendante vérifiée, puis reconnaissance en version 1 |
 | Schéma historique complet, version 1 | Lecture normale, aucune migration ni protection supplémentaire |
-| Sous-ensemble exact des tables historiques, toutes vides, version 0 ou 1 | Création additive des tables manquantes ; aucune table existante n’est supprimée ou remplacée |\n| Tables manquantes avec au moins une ligne métier | Blocage `SCHEMA_PARTIAL`, sans réparation automatique |
+| Sous-ensemble exact des tables historiques, toutes vides, version 0 ou 1 | Après confirmation et protection, création additive des tables manquantes ; aucune table existante n’est supprimée ou remplacée | Tables manquantes, schéma reconnu et données préexistantes | Confirmation, protection vérifiée, puis ajout des seules tables manquantes |
 | Colonnes, contraintes, tables ou déclencheurs inconnus ; version supérieure à 1 | Blocage `SCHEMA_UNKNOWN`, sans modification |
 | Base illisible ou contrôle d'intégrité en échec | Erreur explicite, sans nouvelle base de remplacement |
 
@@ -40,9 +38,7 @@ Les index sur les tables connues sont préservés. Une base dont le SQL diffère
 elle paraît compatible, peut être bloquée : cette prudence nécessite alors un examen
 de son schéma, jamais une suppression de données.
 
-Le catalogue versionné contient uniquement `recognize-historical-schema`, de 0 vers 1.
-Cette migration écrit **seulement `PRAGMA user_version = 1`**. Aucun enregistrement métier,
-champ, prix, date, relation ou contenu de photo n'est réécrit.
+Le catalogue versionné reconnaît le schéma historique v0/v1 et migre vers le schéma courant v2. La migration v2 ajoute uniquement `archivee INTEGER NOT NULL DEFAULT 0` et `date_archivage TEXT` à la table `commandes` existante. Chaque commande historique reste active par défaut ; aucune ligne, ligne de commande, devise, prix, date ou relation métier n'est supprimée ou recalculée. Un fichier sans table métier reçoit les cinq tables v2 dans une transaction ; un schéma partiel reconnu n'est complété qu'après confirmation et protection.
 
 ### Protection préalable
 
@@ -58,17 +54,19 @@ champ, prix, date, relation ou contenu de photo n'est réécrit.
 7. Relire et comparer toutes les données et le schéma, en neutralisant uniquement
    la différence de version attendue, puis valider la transaction.
 
-La migration exige un journal SQLite persistant et `synchronous >= FULL`.
+La migration d'un schéma historique ou partiel exige un journal SQLite persistant et `synchronous >= FULL`, configuré et vérifié avant l'ouverture de la transaction. Cette contrainte n'est pas imposée à chaque ouverture normale de l'application.
 La protection utilise `synchronous = FULL` et vérifie son mode de journalisation.
-Une erreur de capture, de stockage, de relecture ou de comparaison interrompt la migration.
+Une erreur de capture, de stockage, de relecture ou de comparaison interrompt la migration. Cette protection persistée est exigée pour les schémas historiques ou partiels qui contiennent une structure préexistante ; un fichier sans aucune table métier est traité comme un stockage neuf et initialisé transactionnellement sans créer une seconde base de protection.
 Une erreur après écriture de la version provoque un rollback. Si la clôture ne peut pas
 être vérifiée, l'application reste bloquée avec l'erreur `ROLLBACK` ; elle ne restaure,
 ne supprime et ne réinitialise rien automatiquement.
 
 Un arrêt du processus avant le commit laisse SQLite récupérer la transaction au prochain
-démarrage. Après commit, la base est déjà complètement en version 1. Les protections
-partiellement créées ou déjà validées restent conservées. Une création neuve interrompue
-peut laisser un fichier vide : au redémarrage il est classé partiel et bloqué, pas recréé.
+démarrage. Après commit, la base est déjà complètement en version 2. Les protections
+partiellement créées ou déjà validées restent conservées. Si l'interruption d'une création
+ne laisse aucune table métier, le fichier vide est initialisé automatiquement au redémarrage.
+Si une ou plusieurs tables reconnues subsistent sans former le schéma complet, le démarrage
+reste soumis à confirmation et à protection ; aucune table ni donnée existante n'est supprimée.
 
 La protection est un instantané logique interne, **pas une copie physique du fichier SQLite
 ni le système utilisateur Backup & Restore**. Elle contient le schéma et les valeurs, pas
@@ -77,10 +75,7 @@ identifiants internes SQLite non utilisés par les modèles de l'application. La
 ne modifie aucun de ces éléments. Les BLOB et nombres non représentables sans risque
 en JavaScript bloquent la migration plutôt que d'être convertis silencieusement.
 
-Cette protection n'est pas chiffrée ; elle bénéficie de l'isolation du stockage privé de
-l'application, comme la base historique. Sa lecture complète peut consommer beaucoup
-de mémoire avec de nombreuses photos. Aucun mécanisme d'export, mot de passe, purge ou
-restauration utilisateur n'a été ajouté dans cette phase.
+La protection interne n'est pas chiffrée ; elle bénéficie de l'isolation du stockage privé de l'application, comme la base historique. La sauvegarde utilisateur JSON est distincte : elle vérifie les collections, les références et SHA-256, crée une copie de sécurité avant restauration et contrôle les données après restauration. Les sauvegardes v1 sont mises à niveau en v2 lors de leur import.
 
 ### Web et Electron
 
@@ -94,9 +89,7 @@ existante. Une initialisation partielle est ainsi reconnue et complétée ; ce c
 diffère du traitement d'un schéma SQLite partiel. Les écritures sont relues. Une erreur
 de quota laisse toutes les anciennes valeurs intactes et remonte à l'écran.
 
-La coordination atomique entre onglets et les transactions métier localStorage restent
-prévues en phase 3. Aucune normalisation des objets ou correction de modification partielle
-n'est effectuée ici : le problème historique de modification de statut reste à traiter en phase 2.
+La coordination atomique entre onglets et les transactions métier localStorage sont assurées par `writeWebTransaction`. Les modifications partielles conservent les champs historiques, les photos, les dates, les valeurs nulles et les montants zéro.
 
 ## Résultats exécutés
 
@@ -119,7 +112,7 @@ des dates fixes, des valeurs NULL et zéro, du texte accentué, MAD et FCFA.
 Le test de protection reconstruit également une base synthétique vierge à partir du
 document réellement persisté, puis compare chaque enregistrement, le schéma et la version
 à l'original. Les tests d'interruption relisent les fichiers après la mort du processus,
-vérifient le retour à la version 0 ou le commit complet en version 1, puis redémarrent
+vérifient le retour à la version 0/1 ou le commit complet en version 2, puis redémarrent
 l'initialisation sans retirer les protections précédentes.
 
 La première exécution des tests d'interruption a échoué car le bac à sable empêchait
@@ -232,3 +225,8 @@ seuls l'attente de l'initialisation et les retours silencieux en absence de conn
 ont changé. Les SQL CRUD, formats d'objets et limites transactionnelles métier sont identiques.
 `src/main.ts` n'a pas besoin de modification : le verrouillage du service et le montage
 conditionnel des pages dans App suffisent à couvrir les accès.
+
+
+## Démarrage d'un stockage réellement vide
+
+Si le fichier SQLite existe mais ne contient aucune table métier, il est traité comme un stockage neuf (y compris après une création interrompue). Les cinq tables sont créées dans une transaction, puis le schéma et les objets système préexistants tels que `android_metadata` sont vérifiés. Aucune seconde base de protection n'est créée puisqu'aucune table métier ni donnée applicative n'existe. Ce parcours ne demande plus de confirmation et permet d'ouvrir directement l'interface. Les schémas partiels contenant des tables restent soumis à confirmation et à protection persistée.

@@ -10,6 +10,7 @@ vi.mock('@ionic/vue', async () => {
   const names = ['IonApp', 'IonTabs', 'IonTabBar', 'IonTabButton', 'IonIcon', 'IonLabel', 'IonPage', 'IonContent', 'IonSpinner', 'IonButton'];
   return {
     ...Object.fromEntries(names.map(name => [name, defineComponent({setup: (_, {slots}) => () => h('div', slots.default?.())})])),
+    useBackButton: () => undefined,
     IonRouterOutlet: defineComponent({setup() { mountedPages.count++; return () => h('div', 'TEST-pages'); }})
   };
 });

@@ -132,7 +132,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { onIonViewWillEnter } from '@ionic/vue';
 import {
   IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonButtons,
   IonBackButton, IonButton, IonIcon, IonCard, IonCardHeader, IonCardTitle,

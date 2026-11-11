@@ -82,3 +82,13 @@ export const HISTORICAL_SCHEMA = {
 
 export type TableName = keyof typeof HISTORICAL_SCHEMA;
 export const TABLE_NAMES = Object.keys(HISTORICAL_SCHEMA) as TableName[];
+
+
+// Schéma courant v2 : l’archivage est indépendant du statut métier.
+export const CURRENT_SCHEMA = {
+  ...HISTORICAL_SCHEMA,
+  commandes: HISTORICAL_SCHEMA.commandes.replace(
+    'date_modification TEXT NOT NULL,',
+    'date_modification TEXT NOT NULL,\n        archivee INTEGER NOT NULL DEFAULT 0,\n        date_archivage TEXT,'
+  )
+} as const;

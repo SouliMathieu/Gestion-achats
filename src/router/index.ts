@@ -42,6 +42,7 @@ const routes: Array<RouteRecordRaw> = [
     path: '/commandes/:id',
     component: () => import('@/views/CommandeDetailPage.vue')
   },
+  { path: '/commandes/archivees', component: () => import('@/views/ArchivedCommandesPage.vue') },
   {
     path: '/sauvegardes',
     component: () => import('@/views/BackupPage.vue')

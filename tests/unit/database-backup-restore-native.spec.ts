@@ -4,13 +4,12 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseService } from '../../src/services/database.service';
-import { DATABASE_NAME } from '../../src/services/database-initialization';
 import { NativeHarness, seed } from '../helpers/native-sqlite';
 
 const harnesses: NativeHarness[] = [];
 function setup() {
   const directory = mkdtempSync(join(tmpdir(), 'gestion-backup-restore-'));
-  seed(directory, 1);
+  seed(directory, 2);
   const harness = new NativeHarness(directory);
   harnesses.push(harness);
   const service = new DatabaseService({sqlite:harness.api,platform:'android'});

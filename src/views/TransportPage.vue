@@ -234,7 +234,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 import {
   IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonButtons, IonButton,
   IonIcon, IonSearchbar, IonList, IonListHeader, IonItem, IonItemSliding,
@@ -248,7 +248,6 @@ import {
 import DatabaseService from '@/services/database.service';
 import { v4 as uuidv4 } from 'uuid';
 
-const route = useRoute();
 const router = useRouter();
 
 const transports = ref<any[]>([]);
