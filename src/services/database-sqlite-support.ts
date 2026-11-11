@@ -22,7 +22,7 @@ export async function digest(document: string): Promise<string> {
   return Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function ensureDurableWriteConfiguration(db: SQLiteDBConnection): Promise<void> {
+export async function ensureDurableWriteConfiguration(db: SQLiteDBConnection): Promise<void> {
   // FULL doit être appliqué hors transaction : sur Android/WAL, SQLite peut démarrer en NORMAL.
   const journal = await db.query('PRAGMA journal_mode;');
   const journalMode = String(Object.values(journal.values?.[0] ?? {})[0] ?? '').toLowerCase();
@@ -51,8 +51,8 @@ export async function openConnection(sqlite: NativeConnections, name: string, re
   const opened = await db.isDBOpen();
   if (typeof opened.result !== 'boolean') throw new Error('État d’ouverture indéterminé.');
   if (!opened.result) await db.open();
-  // Toute connexion en écriture (base métier ou protection) doit être durable avant le premier write.
-  if (!readonly) await ensureDurableWriteConfiguration(db);
+  // La politique de durabilité est appliquée explicitement avant les migrations protégées,
+  // pas à chaque ouverture normale : le plugin Android peut fournir des valeurs par défaut différentes.
   return db;
 }
 

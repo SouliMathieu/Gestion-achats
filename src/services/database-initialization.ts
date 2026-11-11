@@ -1,7 +1,7 @@
 import type { SQLiteDBConnection } from '@capacitor-community/sqlite';
 import { HISTORICAL_SCHEMA, TABLE_NAMES, type TableName } from './database-schema';
 import { persistProtection } from './database-migration-protection';
-import { canonical, openConnection, type NativeConnections } from './database-sqlite-support';
+import { canonical, ensureDurableWriteConfiguration, openConnection, type NativeConnections } from './database-sqlite-support';
 export type { NativeConnections } from './database-sqlite-support';
 
 export const DATABASE_NAME = 'gestion_achats';
@@ -99,7 +99,9 @@ function requireKnown(report: Inspection) {
 }
 
 function requiresEmptySchemaConfirmation(report: Inspection): boolean {
-  return report.kind === 'empty-existing' || report.kind === 'partial-empty' || report.kind === 'partial';
+  // Un fichier sans aucune table applicative est un stockage neuf/interrompu, sans données métier.
+  // Il est initialisé automatiquement ; les schémas partiels restent soumis à confirmation.
+  return report.kind === 'partial-empty' || report.kind === 'partial';
 }
 
 function emptySchemaConfirmationError(report: Inspection) {
@@ -130,41 +132,51 @@ export async function captureDatabase(db: SQLiteDBConnection, inspection: Inspec
 export const MIGRATIONS = [{id: 'recognize-historical-schema', from: 0, to: 1}] as const;
 
 async function baseline(db: SQLiteDBConnection, sqlite: NativeConnections, existed: boolean, confirmEmptySchema: boolean): Promise<InitializationReport> {
+  // Préflight sans transaction : PRAGMA synchronous ne peut pas être modifié dans une transaction.
+  const preflight = await inspectDatabase(db, existed);
+  requireKnown(preflight);
+  if (requiresEmptySchemaConfirmation(preflight) && !confirmEmptySchema) {
+    throw emptySchemaConfirmationError(preflight);
+  }
+  if (preflight.kind === 'current') return preflight;
+
+  const needsPersistedProtection = preflight.kind === 'historical' ||
+    preflight.kind === 'partial-empty' || preflight.kind === 'partial';
+  if (needsPersistedProtection) {
+    // La base contient déjà une structure ou des données à préserver : configuration durable obligatoire.
+    await ensureDurableWriteConfiguration(db);
+  }
+
   let active = false;
   try {
-    active = true;
     await db.beginTransaction();
+    active = true;
     // Relecture sous verrou : une inspection antérieure ne suffit pas à autoriser une écriture.
     const before = await inspectDatabase(db, existed);
     requireKnown(before);
     if (requiresEmptySchemaConfirmation(before) && !confirmEmptySchema) {
       throw emptySchemaConfirmationError(before);
     }
-    if (before.kind === 'current') {
-      await db.commitTransaction();
-      active = false;
-      return before;
+    if (before.kind !== preflight.kind || before.version !== preflight.version) {
+      throw new Error('La base a changé entre le contrôle préalable et la transaction.');
     }
-    const safety = await queryRows(db, 'PRAGMA synchronous;');
-    const journal = await queryRows(db, 'PRAGMA journal_mode;');
-    const sync = Number(Object.values(safety[0] ?? {})[0]);
-    if (!Number.isFinite(sync) || sync < 2 ||
-      !['delete', 'wal', 'truncate', 'persist'].includes(String(Object.values(journal[0] ?? {})[0]).toLowerCase())) {
-      throw new Error('Configuration SQLite insuffisante pour une migration durable.');
-    }
+
     let document: string | undefined;
     let protectionId: string | undefined;
-    if (before.kind === 'historical' || before.kind === 'empty-existing' ||
-      before.kind === 'partial-empty' || before.kind === 'partial') {
+    if (before.kind !== 'new') {
+      // Capture en mémoire pour comparer les objets préexistants après complétion.
+      document = await captureDatabase(db, before);
+    }
+    if (needsPersistedProtection && document) {
       try {
-        // Toute base existante à compléter est sauvegardée et relue avant la moindre modification.
-        document = await captureDatabase(db, before);
+        // Les bases historiques/partielles sont protégées et relues avant toute modification.
         protectionId = await persistProtection(sqlite, document);
       } catch (error) {
         throw new DatabaseInitializationError('PROTECTION',
           'La copie de protection n’a pas pu être vérifiée. Aucune modification du schéma n’a été effectuée. Les données originales sont conservées.', before, error);
       }
     }
+
     if (before.kind === 'new' || before.kind === 'empty-existing' ||
       before.kind === 'partial-empty' || before.kind === 'partial') {
       // CREATE TABLE IF NOT EXISTS ajoute les tables absentes sans modifier les tables existantes.
@@ -174,7 +186,7 @@ async function baseline(db: SQLiteDBConnection, sqlite: NativeConnections, exist
     const after = await inspectDatabase(db, true);
     if (after.kind !== 'current') throw new Error('Schéma final non conforme.');
     if (document) {
-      // Comparaison de chaque table et objet déjà présent avant toute création.
+      // Comparaison de chaque table et objet préexistant avant validation.
       const original = JSON.parse(document) as {schema: Row[]; data: Record<string, Row[]>};
       const current = JSON.parse(await captureDatabase(db, {...after, version: before.version})) as {schema: Row[]; data: Record<string, Row[]>};
       for (const [name, rows] of Object.entries(original.data)) {

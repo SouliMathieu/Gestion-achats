@@ -11,6 +11,9 @@ export async function persistProtection(sqlite: NativeConnections, document: str
   let closed = false;
   try {
     await db.execute('PRAGMA synchronous = FULL;', false);
+    const synchronous = await db.query('PRAGMA synchronous;');
+    const sync = Number(Object.values(synchronous.values?.[0] ?? {})[0]);
+    if (!Number.isFinite(sync) || sync < 2) throw new Error('La protection SQLite n’a pas confirmé synchronous FULL.');
     const journal = await db.query('PRAGMA journal_mode;');
     const mode = String(Object.values(journal.values?.[0] ?? {})[0]).toLowerCase();
     if (!['delete', 'wal', 'truncate', 'persist'].includes(mode)) throw new Error('Protection non durable.');

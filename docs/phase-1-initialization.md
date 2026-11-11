@@ -58,9 +58,9 @@ champ, prix, date, relation ou contenu de photo n'est réécrit.
 7. Relire et comparer toutes les données et le schéma, en neutralisant uniquement
    la différence de version attendue, puis valider la transaction.
 
-La migration exige un journal SQLite persistant et `synchronous >= FULL`.
+La migration d'un schéma historique ou partiel exige un journal SQLite persistant et `synchronous >= FULL`, configuré et vérifié avant l'ouverture de la transaction. Cette contrainte n'est pas imposée à chaque ouverture normale de l'application.
 La protection utilise `synchronous = FULL` et vérifie son mode de journalisation.
-Une erreur de capture, de stockage, de relecture ou de comparaison interrompt la migration.
+Une erreur de capture, de stockage, de relecture ou de comparaison interrompt la migration. Cette protection persistée est exigée pour les schémas historiques ou partiels qui contiennent une structure préexistante ; un fichier sans aucune table métier est traité comme un stockage neuf et initialisé transactionnellement sans créer une seconde base de protection.
 Une erreur après écriture de la version provoque un rollback. Si la clôture ne peut pas
 être vérifiée, l'application reste bloquée avec l'erreur `ROLLBACK` ; elle ne restaure,
 ne supprime et ne réinitialise rien automatiquement.
@@ -232,3 +232,8 @@ seuls l'attente de l'initialisation et les retours silencieux en absence de conn
 ont changé. Les SQL CRUD, formats d'objets et limites transactionnelles métier sont identiques.
 `src/main.ts` n'a pas besoin de modification : le verrouillage du service et le montage
 conditionnel des pages dans App suffisent à couvrir les accès.
+
+
+## Démarrage d'un stockage réellement vide
+
+Si le fichier SQLite existe mais ne contient aucune table métier, il est traité comme un stockage neuf (y compris après une création interrompue). Les cinq tables sont créées dans une transaction, puis le schéma et les objets système préexistants tels que `android_metadata` sont vérifiés. Aucune seconde base de protection n'est créée puisqu'aucune table métier ni donnée applicative n'existe. Ce parcours ne demande plus de confirmation et permet d'ouvrir directement l'interface. Les schémas partiels contenant des tables restent soumis à confirmation et à protection persistée.

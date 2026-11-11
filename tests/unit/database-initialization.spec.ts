@@ -114,21 +114,32 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
       expect(directory).toBeTruthy();
     });
 
-  it('exige une confirmation avant de créer les tables dans une base existante vide', async () => {
+  it('initialise automatiquement un fichier SQLite existant sans aucune table métier', async () => {
     const {service, directory, harness} = setup(0);
     const db = new DatabaseSync(harness.path(DATABASE_NAME));
-    db.exec('PRAGMA foreign_keys=OFF; DROP TABLE commande_lignes; DROP TABLE commandes; DROP TABLE articles; DROP TABLE fournisseurs; DROP TABLE transport;');
+    db.exec("PRAGMA foreign_keys=OFF; DROP TABLE commande_lignes; DROP TABLE commandes; DROP TABLE articles; DROP TABLE fournisseurs; DROP TABLE transport; CREATE TABLE android_metadata(locale TEXT); INSERT INTO android_metadata VALUES ('fr_FR');");
     db.close();
 
-    const before = readFileSync(harness.path(DATABASE_NAME));
-    await expect(service.initDatabase()).rejects.toMatchObject({code: 'EMPTY_DATABASE_CONFIRMATION'});
-    expect(readFileSync(harness.path(DATABASE_NAME))).toEqual(before);
-    expect(harness.events.some(e => e.name === DATABASE_NAME && e.method === 'execute' && e.sql?.includes('CREATE TABLE'))).toBe(false);
-
-    const report = await service.confirmEmptyDatabaseInitialization();
+    const report = await service.initDatabase();
     expect(report).toMatchObject({kind: 'empty-existing', version: 1});
     expect(Object.values(report.counts)).toEqual([0, 0, 0, 0, 0]);
-    expect(Object.keys(rawSnapshot(directory).data).sort()).toEqual(['articles', 'commande_lignes', 'commandes', 'fournisseurs', 'transport']);
+    expect(Object.keys(rawSnapshot(directory).data).sort()).toEqual(['android_metadata', 'articles', 'commande_lignes', 'commandes', 'fournisseurs', 'transport']);
+    expect(rawSnapshot(directory).data.android_metadata).toEqual([{locale: 'fr_FR'}]);
+    expect(harness.events.some(e => e.name === PROTECTION_DATABASE)).toBe(false);
+  });
+
+  it('initialise un fichier existant vide même si SQLite démarre en NORMAL, sans exiger la base de protection', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'gestion-empty-normal-'));
+    const harness = new NativeHarness(directory, 1);
+    harnesses.push(harness);
+    const empty = new DatabaseSync(harness.path(DATABASE_NAME));
+    empty.close();
+    const service = new DatabaseService({sqlite: harness.api, platform: 'android'});
+
+    const report = await service.initDatabase();
+    expect(report).toMatchObject({kind: 'empty-existing', version: 1});
+    expect(Object.values(report.counts)).toEqual([0, 0, 0, 0, 0]);
+    expect(harness.events.some(e => e.name === PROTECTION_DATABASE)).toBe(false);
   });
 
   it.each([0, 1])('demande confirmation puis complète uniquement les tables manquantes d’un schéma vide (version %s)', async version => {
