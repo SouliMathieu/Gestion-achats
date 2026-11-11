@@ -1,8 +1,10 @@
 name: Build Android APK & Desktop
 
 on:
+  # The APK is built only from the protected production branch or the one-time
+  # final validation branch. Feature-branch pushes run validation.yml instead.
   push:
-    branches: [ main, feat/backup-restore-v2, fix/confirm-empty-db-initialization, fix/show-sqlite-initialization-cause ]
+    branches: [ main, release/global-test-apk ]
   workflow_dispatch: {}
 
 jobs:
@@ -28,7 +30,6 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          # Le package historique "tools" n'existe plus dans le dépôt SDK Google.
           packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
 
       - name: Install dependencies
@@ -41,6 +42,9 @@ jobs:
 
       - name: Unit tests
         run: npm run test:unit -- --run --threads=false
+
+      - name: Lint
+        run: npm run lint
 
       - name: Build web app
         run: npx vite build
