@@ -40,8 +40,7 @@ async function sha256(value: string): Promise<string> {
 }
 
 function payloadOf(doc: BackupDocument): string {
-  const payload = {...doc};
-  delete payload.sha256;
+  const payload = Object.fromEntries(Object.entries(doc).filter(([key]) => key !== 'sha256'));
   return stable(payload);
 }
 
