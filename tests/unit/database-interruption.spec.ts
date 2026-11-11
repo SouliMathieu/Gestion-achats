@@ -22,7 +22,7 @@ describe('Interruption réelle du processus pendant une migration SQLite', () =>
       const child = spawnSync(process.execPath, [script, directory, point], {encoding: 'utf8', timeout: 15000});
       expect(child.error, child.stderr).toBeUndefined();
       expect(child.signal, child.stderr).toBe('SIGKILL');
-      expect(rawSnapshot(directory)).toEqual({...before, version: point === 'after-commit' ? 1 : 0});
+      expect(rawSnapshot(directory)).toEqual({...before, version: point === 'after-commit' ? 2 : 0});
       const harness = new NativeHarness(directory);
       let priorProtections = 0;
       if ((await harness.api.isDatabase(PROTECTION_DATABASE)).result) {
@@ -32,8 +32,8 @@ describe('Interruption réelle du processus pendant une migration SQLite', () =>
       }
       try {
         const report = (await initializeNativeDatabase(harness.api)).report;
-        expect(report.version).toBe(1);
-        expect(rawSnapshot(directory)).toEqual({...before, version: 1});
+        expect(report.version).toBe(2);
+        expect(rawSnapshot(directory)).toEqual({...before, version: 2});
         const guard = new DatabaseSync(harness.path(PROTECTION_DATABASE));
         expect(guard.prepare('SELECT COUNT(*) AS n FROM protections').get().n).toBeGreaterThanOrEqual(priorProtections);
         guard.close();
@@ -51,7 +51,7 @@ describe('Interruption réelle du processus pendant une migration SQLite', () =>
     db.close();
     try {
       const initialized = await initializeNativeDatabase(harness.api);
-      expect(initialized.report).toMatchObject({kind: 'empty-existing', version: 1});
+      expect(initialized.report).toMatchObject({kind: 'empty-existing', version: 2});
       expect(Object.values(initialized.report.counts)).toEqual([0, 0, 0, 0, 0]);
       expect(rawSnapshot(directory).data).toHaveProperty('articles');
       expect(rawSnapshot(directory).data).toHaveProperty('fournisseurs');

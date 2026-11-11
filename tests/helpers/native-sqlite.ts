@@ -86,6 +86,9 @@ class NativeDatabase {
 export function seed(directory: string, version = 0) {
   const db = new DatabaseSync(join(directory, 'gestion_achats.db'));
   db.exec(readFileSync(new URL('../fixtures/historical-schema.sql', import.meta.url), 'utf8'));
+  if (version >= 2) {
+    db.exec('ALTER TABLE commandes ADD COLUMN archivee INTEGER NOT NULL DEFAULT 0; ALTER TABLE commandes ADD COLUMN date_archivage TEXT;');
+  }
   // Chaque colonne reçoit une valeur synthétique, y compris les champs facultatifs et photos.
   const ids: Record<string, string> = {articles: 'TEST-ARTICLE', fournisseurs: 'TEST-FOURNISSEUR',
     transport: 'TEST-TRANSPORT', commandes: 'TEST-COMMANDE', commande_lignes: 'TEST-LIGNE'};
@@ -93,6 +96,8 @@ export function seed(directory: string, version = 0) {
     const columns = db.prepare(`PRAGMA table_info(${table})`).all();
     const values = columns.map((c: any) => {
       if (c.name === 'id') return ids[table];
+      if (c.name === 'archivee') return 0;
+      if (c.name === 'date_archivage') return null;
       if (c.name === 'fournisseur_id') return ids.fournisseurs;
       if (c.name === 'transport_id') return ids.transport;
       if (c.name === 'commande_id') return ids.commandes;

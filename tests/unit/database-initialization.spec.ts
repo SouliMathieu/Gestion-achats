@@ -32,7 +32,7 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
   });
 
   it.each([false, true])('réutilise une connexion enregistrée, déjà ouverte=%s', async opened => {
-    const {service, harness} = setup(1);
+    const {service, harness} = setup(2);
     const db = await harness.api.createConnection(DATABASE_NAME, false, 'no-encryption', 1, false);
     if (opened) await db.open();
     const report = await service.initDatabase();
@@ -45,7 +45,7 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
   it('crée une base réellement absente et vérifie ses cinq tables en version 1', async () => {
     const {service, directory} = setup();
     const report = await service.initDatabase();
-    expect(report).toMatchObject({kind: 'new', version: 1});
+    expect(report).toMatchObject({kind: 'new', version: 2});
     expect(Object.values(report.counts)).toEqual([0, 0, 0, 0, 0]);
     expect(Object.keys(rawSnapshot(directory).data)).toHaveLength(5);
   });
@@ -72,9 +72,9 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
     const {service, directory, harness} = setup(0);
     const before = rawSnapshot(directory);
     const report = await service.initDatabase();
-    expect(report).toMatchObject({kind: 'historical', version: 1});
+    expect(report).toMatchObject({kind: 'historical', version: 2});
     expect(report.protectionId).toBeTruthy();
-    expect(rawSnapshot(directory)).toEqual({...before, version: 1});
+    expect(rawSnapshot(directory)).toEqual({...before, version: 2});
     const guard = new DatabaseSync(harness.path(PROTECTION_DATABASE), {readOnly: true});
     try {
       const row = guard.prepare('SELECT * FROM protections').get();
@@ -121,7 +121,7 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
     db.close();
 
     const report = await service.initDatabase();
-    expect(report).toMatchObject({kind: 'empty-existing', version: 1});
+    expect(report).toMatchObject({kind: 'empty-existing', version: 2});
     expect(Object.values(report.counts)).toEqual([0, 0, 0, 0, 0]);
     expect(Object.keys(rawSnapshot(directory).data).sort()).toEqual(['android_metadata', 'articles', 'commande_lignes', 'commandes', 'fournisseurs', 'transport']);
     expect(rawSnapshot(directory).data.android_metadata).toEqual([{locale: 'fr_FR'}]);
@@ -164,7 +164,7 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
     expect(rawSnapshot(directory)).toEqual(before);
 
     const report = await service.confirmEmptyDatabaseInitialization();
-    expect(report).toMatchObject({kind: 'partial-empty', version: 1});
+    expect(report).toMatchObject({kind: 'partial-empty', version: 2});
     expect(Object.values(report.counts)).toEqual([0, 0, 0, 0, 0]);
     expect(Object.keys(rawSnapshot(directory).data).sort()).toEqual(['articles', 'commande_lignes', 'commandes', 'fournisseurs', 'transport']);
     expect(rawSnapshot(directory).data.transport).toEqual(before.data.transport);
@@ -186,7 +186,7 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
     await expect(service.initDatabase()).rejects.toMatchObject({code: 'EMPTY_DATABASE_CONFIRMATION'});
     expect(rawSnapshot(directory)).toEqual(before);
     const report = await service.confirmEmptyDatabaseInitialization();
-    expect(report.version).toBe(1);
+    expect(report.version).toBe(2);
     expect(rawSnapshot(directory).data.transport).toEqual(before.data.transport);
     expect(rawSnapshot(directory).data.fournisseurs).toEqual(before.data.fournisseurs);
     expect(rawSnapshot(directory).data.articles).toEqual([]);
