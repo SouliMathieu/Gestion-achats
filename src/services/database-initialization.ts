@@ -163,18 +163,19 @@ async function baseline(db: SQLiteDBConnection, sqlite: NativeConnections, exist
 
     let document: string | undefined;
     let protectionId: string | undefined;
-    if (before.kind !== 'new') {
-      // Capture en mémoire pour comparer les objets préexistants après complétion.
-      document = await captureDatabase(db, before);
-    }
-    if (needsPersistedProtection && document) {
-      try {
+    try {
+      if (before.kind !== 'new') {
+        // Capture en mémoire pour comparer les objets préexistants après complétion.
+        document = await captureDatabase(db, before);
+      }
+      if (needsPersistedProtection && document) {
         // Les bases historiques/partielles sont protégées et relues avant toute modification.
         protectionId = await persistProtection(sqlite, document);
-      } catch (error) {
-        throw new DatabaseInitializationError('PROTECTION',
-          'La copie de protection n’a pas pu être vérifiée. Aucune modification du schéma n’a été effectuée. Les données originales sont conservées.', before, error);
       }
+    } catch (error) {
+      // Capture, sérialisation, stockage et relecture sont une seule étape de protection.
+      throw new DatabaseInitializationError('PROTECTION',
+        'La copie de protection n’a pas pu être vérifiée. Aucune modification du schéma n’a été effectuée. Les données originales sont conservées.', before, error);
     }
 
     if (before.kind === 'new' || before.kind === 'empty-existing' ||

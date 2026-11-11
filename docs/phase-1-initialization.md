@@ -31,7 +31,7 @@ L'inspection contrôle `quick_check`, la version, `sqlite_master`, les colonnes,
 | Fichier absent ou base sans table métier, version 0 ou 1 | Création transactionnelle des cinq tables historiques et version 1 |
 | Schéma historique complet, version 0 | Protection indépendante vérifiée, puis reconnaissance en version 1 |
 | Schéma historique complet, version 1 | Lecture normale, aucune migration ni protection supplémentaire |
-| Sous-ensemble exact des tables historiques, toutes vides, version 0 ou 1 | Création additive des tables manquantes ; aucune table existante n’est supprimée ou remplacée |\n| Tables manquantes avec au moins une ligne métier | Blocage `SCHEMA_PARTIAL`, sans réparation automatique |
+| Sous-ensemble exact des tables historiques, toutes vides, version 0 ou 1 | Après confirmation et protection, création additive des tables manquantes ; aucune table existante n’est supprimée ou remplacée | Tables manquantes, schéma reconnu et données préexistantes | Confirmation, protection vérifiée, puis ajout des seules tables manquantes |
 | Colonnes, contraintes, tables ou déclencheurs inconnus ; version supérieure à 1 | Blocage `SCHEMA_UNKNOWN`, sans modification |
 | Base illisible ou contrôle d'intégrité en échec | Erreur explicite, sans nouvelle base de remplacement |
 
@@ -41,8 +41,10 @@ elle paraît compatible, peut être bloquée : cette prudence nécessite alors u
 de son schéma, jamais une suppression de données.
 
 Le catalogue versionné contient uniquement `recognize-historical-schema`, de 0 vers 1.
-Cette migration écrit **seulement `PRAGMA user_version = 1`**. Aucun enregistrement métier,
-champ, prix, date, relation ou contenu de photo n'est réécrit.
+Pour un schéma historique complet, cette migration écrit **seulement `PRAGMA user_version = 1`**.
+Pour un fichier sans table métier, elle crée les cinq tables dans une transaction ; pour un
+schéma partiel reconnu, elle ajoute uniquement les tables absentes après confirmation et
+protection. Aucun enregistrement, champ ou contenu existant n'est réécrit.
 
 ### Protection préalable
 
@@ -67,8 +69,10 @@ ne supprime et ne réinitialise rien automatiquement.
 
 Un arrêt du processus avant le commit laisse SQLite récupérer la transaction au prochain
 démarrage. Après commit, la base est déjà complètement en version 1. Les protections
-partiellement créées ou déjà validées restent conservées. Une création neuve interrompue
-peut laisser un fichier vide : au redémarrage il est classé partiel et bloqué, pas recréé.
+partiellement créées ou déjà validées restent conservées. Si l'interruption d'une création
+ne laisse aucune table métier, le fichier vide est initialisé automatiquement au redémarrage.
+Si une ou plusieurs tables reconnues subsistent sans former le schéma complet, le démarrage
+reste soumis à confirmation et à protection ; aucune table ni donnée existante n'est supprimée.
 
 La protection est un instantané logique interne, **pas une copie physique du fichier SQLite
 ni le système utilisateur Backup & Restore**. Elle contient le schéma et les valeurs, pas

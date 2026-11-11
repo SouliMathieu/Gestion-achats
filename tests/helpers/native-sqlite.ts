@@ -117,8 +117,11 @@ export function rawSnapshot(directory: string) {
   const db = new DatabaseSync(join(directory, 'gestion_achats.db'));
   try {
     const schema = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all();
-    const data = Object.fromEntries(schema.filter((s: any) => s.type === 'table').map((s: any) =>
-      [s.name, db.prepare(`SELECT * FROM "${s.name}" ORDER BY id`).all().map((row: object) => ({...row}))]));
+    const data = Object.fromEntries(schema.filter((s: any) => s.type === 'table').map((s: any) => {
+      const columns = db.prepare(`PRAGMA table_info("${s.name}")`).all();
+      const orderById = columns.some((column: any) => column.name === 'id') ? ' ORDER BY "id"' : '';
+      return [s.name, db.prepare(`SELECT * FROM "${s.name}"${orderById}`).all().map((row: object) => ({...row}))];
+    }));
     return {version: db.prepare('PRAGMA user_version').get().user_version, schema, data};
   } finally { db.close(); }
 }

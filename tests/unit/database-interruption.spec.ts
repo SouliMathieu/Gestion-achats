@@ -40,7 +40,7 @@ describe('Interruption réelle du processus pendant une migration SQLite', () =>
       } finally { harness.close(); }
     });
 
-  it('une création interrompue ne devient jamais une base historique vide recréée automatiquement', async () => {
+  it('reprend automatiquement une création interrompue lorsque aucune table métier n’a été validée', async () => {
     const directory = mkdtempSync(join(root, 'new-'));
     const child = spawnSync(process.execPath, [script, directory, 'new-first-table'], {encoding: 'utf8', timeout: 15000});
     expect(child.error, child.stderr).toBeUndefined();
@@ -50,9 +50,14 @@ describe('Interruption réelle du processus pendant une migration SQLite', () =>
     expect(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()).toEqual([]);
     db.close();
     try {
-      await expect(initializeNativeDatabase(harness.api)).rejects.toMatchObject({code: 'EMPTY_DATABASE_CONFIRMATION'});
-      const confirmed = await initializeNativeDatabase(harness.api, true);
-      expect(confirmed.report).toMatchObject({kind: 'empty-existing', version: 1});
+      const initialized = await initializeNativeDatabase(harness.api);
+      expect(initialized.report).toMatchObject({kind: 'empty-existing', version: 1});
+      expect(Object.values(initialized.report.counts)).toEqual([0, 0, 0, 0, 0]);
+      expect(rawSnapshot(directory).data).toHaveProperty('articles');
+      expect(rawSnapshot(directory).data).toHaveProperty('fournisseurs');
+      expect(rawSnapshot(directory).data).toHaveProperty('transport');
+      expect(rawSnapshot(directory).data).toHaveProperty('commandes');
+      expect(rawSnapshot(directory).data).toHaveProperty('commande_lignes');
     } finally { harness.close(); }
   });
 });
