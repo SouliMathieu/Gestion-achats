@@ -7,6 +7,20 @@ import { normalizeArticle, normalizeFournisseur, normalizeTransport, normalizeCo
 import { writeWebTransaction } from './database-web-transaction';
 import { TABLE_NAMES, type TableName } from './database-schema';
 
+function validateCommandeInput(commande:any,lignes:any[]) {
+  if (!commande?.fournisseurId && !commande?.fournisseur_id) throw new Error('Un fournisseur doit être sélectionné.');
+  if (!Array.isArray(lignes)||!lignes.length) throw new Error('Une commande doit contenir au moins une ligne.');
+  if (commande.devise!=='MAD'&&commande.devise!=='FCFA') throw new Error('La devise de la commande est invalide.');
+  const transport=Number(commande.coutTransport??commande.cout_transport??0);
+  if (!Number.isFinite(transport)||transport<0) throw new Error('Le coût du transport doit être positif ou nul.');
+  for(const [i,line] of lignes.entries()){
+    const q=Number(line.quantite),p=Number(line.prixUnitaire??line.prix_unitaire);
+    if(!Number.isInteger(q)||q<=0) throw new Error(\`Quantité invalide à la ligne \${i+1}.\`);
+    if(!Number.isFinite(p)||p<0) throw new Error(\`Prix invalide à la ligne \${i+1}.\`);
+    if(line.devise!==commande.devise) throw new Error('Toutes les lignes doivent utiliser la même devise que la commande. Aucune conversion automatique n’est effectuée.');
+  }
+}
+
 export class DatabaseService {
   private db: SQLiteDBConnection | null = null;
   private sqlite: NativeConnections;
@@ -368,25 +382,12 @@ export class DatabaseService {
     }
   }
 
-  private validateCommandeInput(commande:any,lignes:any[]) {
-    if (!commande?.fournisseurId && !commande?.fournisseur_id) throw new Error('Un fournisseur doit être sélectionné.');
-    if (!Array.isArray(lignes)||!lignes.length) throw new Error('Une commande doit contenir au moins une ligne.');
-    if (commande.devise!=='MAD'&&commande.devise!=='FCFA') throw new Error('La devise de la commande est invalide.');
-    const transport=Number(commande.coutTransport??commande.cout_transport??0);
-    if (!Number.isFinite(transport)||transport<0) throw new Error('Le coût du transport doit être positif ou nul.');
-    for(const [i,line] of lignes.entries()){
-      const q=Number(line.quantite),p=Number(line.prixUnitaire??line.prix_unitaire);
-      if(!Number.isInteger(q)||q<=0) throw new Error(`Quantité invalide à la ligne ${i+1}.`);
-      if(!Number.isFinite(p)||p<0) throw new Error(`Prix invalide à la ligne ${i+1}.`);
-      if(line.devise!==commande.devise) throw new Error('Toutes les lignes doivent utiliser la même devise que la commande. Aucune conversion automatique n’est effectuée.');
-    }
-  }
 
   async createCommande(commande: any, lignes: any[]) {
     await this.initDatabase();
     commande = normalizeCommande(commande);
     lignes = lignes.map(normalizeCommandeLine);
-    this.validateCommandeInput(commande,lignes);
+    validateCommandeInput(commande,lignes);
     if (this.isWeb) {
       const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
       const allLignes = JSON.parse(localStorage.getItem('commande_lignes') || '[]');
@@ -462,7 +463,7 @@ export class DatabaseService {
   async updateCommande(id: string, commande: any, lignes?: any[]) {
     await this.initDatabase();
     const patch = normalizeCommande(commande);
-    if(lignes!==undefined)this.validateCommandeInput(patch,lignes.map(normalizeCommandeLine));
+    if(lignes!==undefined)validateCommandeInput(patch,lignes.map(normalizeCommandeLine));
     const modifiedAt = new Date().toISOString();
     if (this.isWeb) {
       const commands = JSON.parse(localStorage.getItem('commandes') || '[]');

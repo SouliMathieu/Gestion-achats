@@ -31,10 +31,10 @@ export async function queryRows(db: SQLiteDBConnection, sql: string): Promise<Ro
 }
 
 function expectedColumns(table: TableName, definition: typeof HISTORICAL_SCHEMA | typeof CURRENT_SCHEMA) {
-  return definition[table].split('\\n').flatMap(line => {
-    const match = line.trim().match(/^(\\w+) (TEXT|REAL|INTEGER)\\b(.*)/);
+  return definition[table].split('\n').flatMap(line => {
+    const match = line.trim().match(/^(\w+) (TEXT|REAL|INTEGER)\b(.*)/);
     if (!match) return [];
-    const d = match[3].match(/\\bDEFAULT\\s+('[^']*'|[^\\s,]+)/i);
+    const d = match[3].match(/\bDEFAULT\s+('[^']*'|[^\s,]+)/i);
     return [{name:match[1],type:match[2],notnull:match[3].includes('NOT NULL')?1:0,pk:match[3].includes('PRIMARY KEY')?1:0,dflt_value:d?d[1].replace(/^'|'$/g,''):null}];
   });
 }
