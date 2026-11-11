@@ -1,11 +1,11 @@
 import type { SQLiteDBConnection } from '@capacitor-community/sqlite';
-import { HISTORICAL_SCHEMA, TABLE_NAMES, type TableName } from './database-schema';
+import { CURRENT_SCHEMA, HISTORICAL_SCHEMA, TABLE_NAMES, type TableName } from './database-schema';
 import { persistProtection } from './database-migration-protection';
 import { canonical, ensureDurableWriteConfiguration, openConnection, type NativeConnections } from './database-sqlite-support';
 export type { NativeConnections } from './database-sqlite-support';
 
 export const DATABASE_NAME = 'gestion_achats';
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 export type SchemaKind = 'new' | 'empty-existing' | 'partial-empty' | 'historical' | 'current' | 'partial' | 'unknown';
 export interface InitializationReport {
   storage: 'sqlite' | 'localStorage';
@@ -30,16 +30,17 @@ export async function queryRows(db: SQLiteDBConnection, sql: string): Promise<Ro
   return result.values;
 }
 
-function expectedColumns(table: TableName) {
-  return HISTORICAL_SCHEMA[table].split('\n').flatMap(line => {
-    const match = line.trim().match(/^(\w+) (TEXT|REAL|INTEGER)\b(.*)/);
-    return match ? [{name: match[1], type: match[2], notnull: match[3].includes('NOT NULL') ? 1 : 0,
-      pk: match[3].includes('PRIMARY KEY') ? 1 : 0, dflt_value: null}] : [];
+function expectedColumns(table: TableName, definition: typeof HISTORICAL_SCHEMA | typeof CURRENT_SCHEMA) {
+  return definition[table].split('\\n').flatMap(line => {
+    const match = line.trim().match(/^(\\w+) (TEXT|REAL|INTEGER)\\b(.*)/);
+    if (!match) return [];
+    const d = match[3].match(/\\bDEFAULT\\s+('[^']*'|[^\\s,]+)/i);
+    return [{name:match[1],type:match[2],notnull:match[3].includes('NOT NULL')?1:0,pk:match[3].includes('PRIMARY KEY')?1:0,dflt_value:d?d[1].replace(/^'|'$/g,''):null}];
   });
 }
 
-function expectedRelations(table: TableName) {
-  return [...HISTORICAL_SCHEMA[table].matchAll(/FOREIGN KEY \((\w+)\) REFERENCES (\w+)\((\w+)\)( ON DELETE CASCADE)?/g)]
+function expectedRelations(table: TableName, definition: typeof HISTORICAL_SCHEMA | typeof CURRENT_SCHEMA) {
+  return [...definition[table].matchAll(/FOREIGN KEY \((\w+)\) REFERENCES (\w+)\((\w+)\)( ON DELETE CASCADE)?/g)]
     .map(m => ({from: m[1], table: m[2], to: m[3], on_delete: m[4] ? 'CASCADE' : 'NO ACTION', on_update: 'NO ACTION', match: 'NONE'}));
 }
 
@@ -55,6 +56,7 @@ export async function inspectDatabase(db: SQLiteDBConnection, existed: boolean):
   const applicationSchema = schema.filter(s => s.name !== 'android_metadata');
   const tables = applicationSchema.filter(s => s.type === 'table');
   const counts: Record<string, number> = {};
+  const definition = version >= 2 ? CURRENT_SCHEMA : HISTORICAL_SCHEMA;
   let matches = true;
   for (const table of TABLE_NAMES) {
     if (!tables.some(t => t.name === table)) continue;
@@ -64,9 +66,9 @@ export async function inspectDatabase(db: SQLiteDBConnection, existed: boolean):
       .map(({from, table, to, on_delete, on_update, match}) => ({from, table, to, on_delete, on_update, match}));
     const actualSql = String(tables.find(t => t.name === table)?.sql);
     const normalizeSql = (sql: string) => sql.replace(/IF NOT EXISTS/gi, '').replace(/\s+/g, '').replace(/;$/, '').toLowerCase();
-    if (normalizeSql(actualSql) !== normalizeSql(HISTORICAL_SCHEMA[table]) ||
-      canonical(columns) !== canonical(expectedColumns(table)) ||
-      canonical(relations.map(canonical).sort()) !== canonical(expectedRelations(table).map(canonical).sort())) matches = false;
+    if (normalizeSql(actualSql) !== normalizeSql(definition[table]) ||
+      canonical(columns) !== canonical(expectedColumns(table, definition)) ||
+      canonical(relations.map(canonical).sort()) !== canonical(expectedRelations(table, definition).map(canonical).sort())) matches = false;
     const result = await queryRows(db, `SELECT COUNT(*) AS count FROM "${table}";`);
     if (typeof result[0]?.count !== 'number') throw new Error('Nombre de lignes illisible.');
     counts[table] = result[0].count;
@@ -76,7 +78,7 @@ export async function inspectDatabase(db: SQLiteDBConnection, existed: boolean):
     (s.type !== 'table' && s.type !== 'index') || !TABLE_NAMES.includes(s.tbl_name as TableName));
   let kind: SchemaKind;
   if (version > SCHEMA_VERSION || unsupported || !matches) kind = 'unknown';
-  else if (tables.length === TABLE_NAMES.length) kind = version === 0 ? 'historical' : 'current';
+  else if (tables.length === TABLE_NAMES.length) kind = version < SCHEMA_VERSION ? 'historical' : 'current';
   else if (!existed && tables.length === 0) kind = 'new';
   else if (tables.length === 0) {
     // Une création interrompue peut laisser un fichier SQLite sans table applicative.
@@ -129,7 +131,7 @@ export async function captureDatabase(db: SQLiteDBConnection, inspection: Inspec
 }
 
 // Catalogue volontairement limité : reconnaissance du schéma historique, sans réécriture métier.
-export const MIGRATIONS = [{id: 'recognize-historical-schema', from: 0, to: 1}] as const;
+export const MIGRATIONS = [{id:'recognize-historical-schema',from:0,to:1},{id:'add-reversible-order-archiving',from:1,to:2}] as const;
 
 async function baseline(db: SQLiteDBConnection, sqlite: NativeConnections, existed: boolean, confirmEmptySchema: boolean): Promise<InitializationReport> {
   // Préflight sans transaction : PRAGMA synchronous ne peut pas être modifié dans une transaction.
@@ -181,9 +183,13 @@ async function baseline(db: SQLiteDBConnection, sqlite: NativeConnections, exist
     if (before.kind === 'new' || before.kind === 'empty-existing' ||
       before.kind === 'partial-empty' || before.kind === 'partial') {
       // CREATE TABLE IF NOT EXISTS ajoute les tables absentes sans modifier les tables existantes.
-      for (const sql of Object.values(HISTORICAL_SCHEMA)) await db.execute(sql + ';', false);
+      for (const sql of Object.values(CURRENT_SCHEMA)) await db.execute(sql + ';', false);
     }
-    await db.execute(`PRAGMA user_version = ${MIGRATIONS[0].to};`, false);
+    if (Number(before.version ?? 0) < 2 && before.schema.some(object => object.type === 'table' && object.name === 'commandes')) {
+      await db.execute('ALTER TABLE commandes ADD COLUMN archivee INTEGER NOT NULL DEFAULT 0;', false);
+      await db.execute('ALTER TABLE commandes ADD COLUMN date_archivage TEXT;', false);
+    }
+    await db.execute(`PRAGMA user_version = ${SCHEMA_VERSION};`, false);
     const after = await inspectDatabase(db, true);
     if (after.kind !== 'current') throw new Error('Schéma final non conforme.');
     if (document) {
@@ -191,9 +197,11 @@ async function baseline(db: SQLiteDBConnection, sqlite: NativeConnections, exist
       const original = JSON.parse(document) as {schema: Row[]; data: Record<string, Row[]>};
       const current = JSON.parse(await captureDatabase(db, {...after, version: before.version})) as {schema: Row[]; data: Record<string, Row[]>};
       for (const [name, rows] of Object.entries(original.data)) {
-        if (canonical(current.data[name]) !== canonical(rows)) throw new Error(`Données modifiées pendant la complétion : ${name}`);
+        const currentRows = name === 'commandes' ? current.data[name].map(row => { const copy={...row}; delete copy.archivee; delete copy.date_archivage; return copy; }) : current.data[name];
+        if (canonical(currentRows) !== canonical(rows)) throw new Error(`Données modifiées pendant la complétion : ${name}`);
       }
       for (const object of original.schema) {
+        if (object.type === 'table' && object.name === 'commandes' && Number(before.version ?? 0) < 2) continue;
         const retained = current.schema.find(item => item.type === object.type && item.name === object.name);
         if (!retained || canonical(retained) !== canonical(object)) throw new Error(`Structure modifiée pendant la complétion : ${String(object.name)}`);
       }

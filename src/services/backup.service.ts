@@ -1,9 +1,9 @@
 import { Capacitor } from '@capacitor/core';
 import DatabaseService from './database.service';
-import { TABLE_NAMES, HISTORICAL_SCHEMA, type TableName } from './database-schema';
+import { TABLE_NAMES, CURRENT_SCHEMA, type TableName } from './database-schema';
 
 export const BACKUP_FORMAT = 'afriki-achats-backup';
-export const BACKUP_FORMAT_VERSION = 1;
+export const BACKUP_FORMAT_VERSION = 2;
 const SNAPSHOT_DB = 'afriki-achats-backup-store';
 const SNAPSHOT_STORE = 'snapshots';
 const MAX_SNAPSHOTS = 10;
@@ -45,7 +45,7 @@ function payloadOf(doc: BackupDocument): string {
 }
 
 function columnsFor(table: TableName): Set<string> {
-  return new Set(HISTORICAL_SCHEMA[table].split('\n').flatMap(line => {
+  return new Set(CURRENT_SCHEMA[table].split('\n').flatMap(line => {
     const match = line.trim().match(/^([a-zA-Z_][a-zA-Z0-9_]*) (?:TEXT|REAL|INTEGER)\b/);
     return match ? [match[1]] : [];
   }));
@@ -190,7 +190,7 @@ export class BackupService {
       app: 'Afriki Achats',
       createdAt: new Date().toISOString(),
       sourceStorage: exported.storage,
-      schemaVersion: 1,
+      schemaVersion: 2,
       tables
     };
     const doc: BackupDocument = {...payload, sha256: await sha256(stable(payload))};
@@ -198,16 +198,18 @@ export class BackupService {
     return doc;
   }
 
-  async validateBackup(input: unknown): Promise<{doc: BackupDocument; report: BackupValidation}> {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Fichier de sauvegarde invalide.');
-    const doc = input as BackupDocument;
-    if (doc.format !== BACKUP_FORMAT || doc.formatVersion !== BACKUP_FORMAT_VERSION || doc.schemaVersion !== 1) throw new Error('Format ou version de sauvegarde non compatible.');
-    if (typeof doc.createdAt !== 'string' || !Number.isFinite(Date.parse(doc.createdAt))) throw new Error('Date de sauvegarde invalide.');
-    if (!['sqlite','localStorage'].includes(doc.sourceStorage)) throw new Error('Origine de sauvegarde inconnue.');
-    if (typeof doc.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(doc.sha256)) throw new Error('Empreinte de sauvegarde invalide.');
-    const tables = validateRows(doc.tables);
-    if (await sha256(payloadOf(doc)) !== doc.sha256) throw new Error('L’empreinte SHA-256 ne correspond pas. Le fichier est altéré ou incomplet.');
-    return {doc:{...doc,tables},report:{valid:true,createdAt:doc.createdAt,counts:Object.fromEntries(TABLE_NAMES.map(t=>[t,tables[t].length])) as Record<TableName,number>,sourceStorage:doc.sourceStorage}};
+  async validateBackup(input:unknown):Promise<{doc:BackupDocument;report:BackupValidation}>{
+    if(!input||typeof input!=='object'||Array.isArray(input))throw new Error('Fichier de sauvegarde invalide.');
+    const doc=input as BackupDocument;
+    if(doc.format!==BACKUP_FORMAT||![1,2].includes(doc.formatVersion)||doc.schemaVersion!==doc.formatVersion)throw new Error('Format ou version de sauvegarde non compatible.');
+    if(typeof doc.createdAt!=='string'||!Number.isFinite(Date.parse(doc.createdAt)))throw new Error('Date de sauvegarde invalide.');
+    if(!['sqlite','localStorage'].includes(doc.sourceStorage))throw new Error('Origine de sauvegarde inconnue.');
+    if(typeof doc.sha256!=='string'||!/^[a-f0-9]{64}$/.test(doc.sha256))throw new Error('Empreinte de sauvegarde invalide.');
+    let tables=validateRows(doc.tables);
+    if(await sha256(payloadOf(doc))!==doc.sha256)throw new Error('L’empreinte SHA-256 ne correspond pas. Le fichier est altéré ou incomplet.');
+    let validated:BackupDocument={...doc,tables};
+    if(doc.formatVersion===1){tables={...tables,commandes:tables.commandes.map((o:any)=>({...o,archivee:false,date_archivage:null}))};validated={...doc,formatVersion:2,schemaVersion:2,tables,sha256:''};validated.sha256=await sha256(payloadOf(validated));}
+    return{doc:validated,report:{valid:true,createdAt:doc.createdAt,counts:Object.fromEntries(TABLE_NAMES.map(t=>[t,tables[t].length])) as Record<TableName,number>,sourceStorage:doc.sourceStorage}};
   }
 
   async saveAutomaticSnapshot(): Promise<BackupDocument> {

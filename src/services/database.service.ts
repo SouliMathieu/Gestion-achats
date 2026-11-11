@@ -368,10 +368,25 @@ export class DatabaseService {
     }
   }
 
+  private validateCommandeInput(commande:any,lignes:any[]) {
+    if (!commande?.fournisseurId && !commande?.fournisseur_id) throw new Error('Un fournisseur doit être sélectionné.');
+    if (!Array.isArray(lignes)||!lignes.length) throw new Error('Une commande doit contenir au moins une ligne.');
+    if (commande.devise!=='MAD'&&commande.devise!=='FCFA') throw new Error('La devise de la commande est invalide.');
+    const transport=Number(commande.coutTransport??commande.cout_transport??0);
+    if (!Number.isFinite(transport)||transport<0) throw new Error('Le coût du transport doit être positif ou nul.');
+    for(const [i,line] of lignes.entries()){
+      const q=Number(line.quantite),p=Number(line.prixUnitaire??line.prix_unitaire);
+      if(!Number.isInteger(q)||q<=0) throw new Error(`Quantité invalide à la ligne ${i+1}.`);
+      if(!Number.isFinite(p)||p<0) throw new Error(`Prix invalide à la ligne ${i+1}.`);
+      if(line.devise!==commande.devise) throw new Error('Toutes les lignes doivent utiliser la même devise que la commande. Aucune conversion automatique n’est effectuée.');
+    }
+  }
+
   async createCommande(commande: any, lignes: any[]) {
     await this.initDatabase();
     commande = normalizeCommande(commande);
     lignes = lignes.map(normalizeCommandeLine);
+    this.validateCommandeInput(commande,lignes);
     if (this.isWeb) {
       const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
       const allLignes = JSON.parse(localStorage.getItem('commande_lignes') || '[]');
@@ -386,8 +401,8 @@ export class DatabaseService {
       const query = `
         INSERT INTO commandes (id, numero, date_commande, fournisseur_id, transport_id,
                               cout_transport, cout_total, devise, mode_paiement, statut,
-                              notes, date_creation, date_modification)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              notes, date_creation, date_modification, archivee, date_archivage)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)
       `;
       await this.db.beginTransaction();
       try {
@@ -411,32 +426,11 @@ export class DatabaseService {
     }
   }
 
-  async getCommandes(filters?: any) {
+  async getCommandes(filters?:any){
     await this.initDatabase();
-    if (this.isWeb) {
-      let commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
-      
-      if (filters?.statut) {
-        commandes = commandes.filter((c: any) => c.statut === filters.statut);
-      }
-      
-      return commandes.map(normalizeCommande).sort((a: any, b: any) => 
-        new Date(b.dateCommande).getTime() - new Date(a.dateCommande).getTime()
-      );
-    } else {
-      if (!this.db) throw new Error('Connexion SQLite indisponible.');
-      let query = 'SELECT * FROM commandes WHERE 1=1';
-      const params: any[] = [];
-
-      if (filters?.statut) {
-        query += ' AND statut = ?';
-        params.push(filters.statut);
-      }
-
-      query += ' ORDER BY date_commande DESC';
-      const result = await this.db.query(query, params);
-      return (result.values || []).map(normalizeCommande);
-    }
+    if(this.isWeb){let rows=JSON.parse(localStorage.getItem('commandes')||'[]');rows=rows.filter((c:any)=>filters?.archived?(c.archivee===true||c.archivee===1):!(c.archivee===true||c.archivee===1));if(filters?.statut)rows=rows.filter((c:any)=>c.statut===filters.statut);return rows.map(normalizeCommande).sort((a:any,b:any)=>new Date(b.dateCommande).getTime()-new Date(a.dateCommande).getTime());}
+    if(!this.db)throw new Error('Connexion SQLite indisponible.');
+    let sql='SELECT * FROM commandes WHERE archivee=?';const params:any[]=[filters?.archived?1:0];if(filters?.statut){sql+=' AND statut=?';params.push(filters.statut);}sql+=' ORDER BY date_commande DESC';const result=await this.db.query(sql,params);return(result.values||[]).map(normalizeCommande);
   }
 
   async getCommandeById(id: string) {
@@ -468,6 +462,7 @@ export class DatabaseService {
   async updateCommande(id: string, commande: any, lignes?: any[]) {
     await this.initDatabase();
     const patch = normalizeCommande(commande);
+    if(lignes!==undefined)this.validateCommandeInput(patch,lignes.map(normalizeCommandeLine));
     const modifiedAt = new Date().toISOString();
     if (this.isWeb) {
       const commands = JSON.parse(localStorage.getItem('commandes') || '[]');
@@ -512,6 +507,19 @@ export class DatabaseService {
     }
   }
 
+  async archiveCommande(id:string){
+    await this.initDatabase();const at=new Date().toISOString();
+    if(this.isWeb){const rows=JSON.parse(localStorage.getItem('commandes')||'[]');const i=rows.findIndex((x:any)=>x.id===id);if(i<0)throw new Error('Commande introuvable.');if(rows[i].archivee===true||rows[i].archivee===1)return;rows[i]={...rows[i],archivee:true,date_archivage:at};writeWebTransaction(localStorage,[{key:'commandes',value:JSON.stringify(rows)}]);return;}
+    if(!this.db)throw new Error('Connexion SQLite indisponible.');
+    await this.db.run('UPDATE commandes SET archivee=1,date_archivage=?,date_modification=? WHERE id=? AND archivee=0',[at,at,id]);
+  }
+  async restoreCommande(id:string){
+    await this.initDatabase();
+    if(this.isWeb){const rows=JSON.parse(localStorage.getItem('commandes')||'[]');const i=rows.findIndex((x:any)=>x.id===id);if(i<0)throw new Error('Commande introuvable.');rows[i]={...rows[i],archivee:false,date_archivage:null};writeWebTransaction(localStorage,[{key:'commandes',value:JSON.stringify(rows)}]);return;}
+    if(!this.db)throw new Error('Connexion SQLite indisponible.');
+    await this.db.run('UPDATE commandes SET archivee=0,date_archivage=NULL,date_modification=? WHERE id=?',[new Date().toISOString(),id]);
+  }
+  async getArchivedCommandes(){return this.getCommandes({archived:true});}
   async updateCommandeStatus(id: string, statut: string) {
     await this.updateCommande(id, {statut});
   }
@@ -629,46 +637,19 @@ export class DatabaseService {
     }
   }
 
-  // STATISTIQUES
-  async getStats() {
+  async getSupplierPurchaseTotals(){
     await this.initDatabase();
-    if (this.isWeb) {
-      const articles = JSON.parse(localStorage.getItem('articles') || '[]');
-      const fournisseurs = JSON.parse(localStorage.getItem('fournisseurs') || '[]');
-      const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
-
-      const totalByDevise: any = {};
-      commandes.forEach((c: any) => {
-        if (!totalByDevise[c.devise]) totalByDevise[c.devise] = 0;
-        totalByDevise[c.devise] += c.coutTotal || 0;
-      });
-
-      const totalAchats = Object.keys(totalByDevise).map(devise => ({
-        total: totalByDevise[devise],
-        devise
-      }));
-
-      return {
-        totalArticles: articles.length,
-        totalFournisseurs: fournisseurs.length,
-        totalCommandes: commandes.length,
-        totalAchats
-      };
-    } else {
-      if (!this.db) throw new Error('Connexion SQLite indisponible.');
-
-      const articles = await this.db.query('SELECT COUNT(*) as count FROM articles');
-      const fournisseurs = await this.db.query('SELECT COUNT(*) as count FROM fournisseurs');
-      const commandes = await this.db.query('SELECT COUNT(*) as count FROM commandes');
-      const totalAchats = await this.db.query('SELECT SUM(cout_total) as total, devise FROM commandes GROUP BY devise');
-
-      return {
-        totalArticles: articles.values?.[0]?.count || 0,
-        totalFournisseurs: fournisseurs.values?.[0]?.count || 0,
-        totalCommandes: commandes.values?.[0]?.count || 0,
-        totalAchats: totalAchats.values || []
-      };
-    }
+    if(this.isWeb){const suppliers=JSON.parse(localStorage.getItem('fournisseurs')||'[]');const orders=JSON.parse(localStorage.getItem('commandes')||'[]').filter((o:any)=>!(o.archivee===true||o.archivee===1));const totals=new Map<string,any>();for(const o of orders){const id=o.fournisseur_id??o.fournisseurId,key=id+'|'+o.devise;const v=totals.get(key)??{fournisseurId:id,fournisseurNom:suppliers.find((s:any)=>s.id===id)?.nom??'Fournisseur inconnu',devise:o.devise,total:0,commandes:0};v.total+=Number(o.cout_total??o.coutTotal??0);v.commandes++;totals.set(key,v);}return[...totals.values()].sort((a,b)=>a.fournisseurNom.localeCompare(b.fournisseurNom)||a.devise.localeCompare(b.devise));}
+    if(!this.db)throw new Error('Connexion SQLite indisponible.');
+    const result=await this.db.query(`SELECT f.id AS fournisseurId,f.nom AS fournisseurNom,c.devise AS devise,SUM(c.cout_total) AS total,COUNT(c.id) AS commandes FROM commandes c INNER JOIN fournisseurs f ON f.id=c.fournisseur_id WHERE c.archivee=0 GROUP BY f.id,f.nom,c.devise ORDER BY f.nom,c.devise`);
+    return result.values??[];
+  }
+  async getStats(){
+    await this.initDatabase();
+    if(this.isWeb){const articles=JSON.parse(localStorage.getItem('articles')||'[]'),fournisseurs=JSON.parse(localStorage.getItem('fournisseurs')||'[]'),commandes=JSON.parse(localStorage.getItem('commandes')||'[]').filter((c:any)=>!(c.archivee===true||c.archivee===1));const totals:Record<string,number>={};commandes.forEach((c:any)=>{totals[c.devise]=(totals[c.devise]??0)+Number(c.coutTotal??c.cout_total??0);});return{totalArticles:articles.length,totalFournisseurs:fournisseurs.length,totalCommandes:commandes.length,totalAchats:Object.keys(totals).map(devise=>({total:totals[devise],devise}))};}
+    if(!this.db)throw new Error('Connexion SQLite indisponible.');
+    const articles=await this.db.query('SELECT COUNT(*) as count FROM articles'),fournisseurs=await this.db.query('SELECT COUNT(*) as count FROM fournisseurs'),commandes=await this.db.query('SELECT COUNT(*) as count FROM commandes WHERE archivee=0'),totalAchats=await this.db.query('SELECT SUM(cout_total) as total,devise FROM commandes WHERE archivee=0 GROUP BY devise');
+    return{totalArticles:articles.values?.[0]?.count||0,totalFournisseurs:fournisseurs.values?.[0]?.count||0,totalCommandes:commandes.values?.[0]?.count||0,totalAchats:totalAchats.values||[]};
   }
 
   async getRecentCommandes(limit: number = 5) {
