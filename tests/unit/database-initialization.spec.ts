@@ -74,7 +74,13 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
     const report = await service.initDatabase();
     expect(report).toMatchObject({kind: 'historical', version: 2});
     expect(report.protectionId).toBeTruthy();
-    expect(rawSnapshot(directory)).toEqual({...before, version: 2});
+    const migrated = rawSnapshot(directory);
+    expect(migrated.version).toBe(2);
+    expect(migrated.data.articles).toEqual(before.data.articles);
+    expect(migrated.data.fournisseurs).toEqual(before.data.fournisseurs);
+    expect(migrated.data.transport).toEqual(before.data.transport);
+    expect(migrated.data.commande_lignes).toEqual(before.data.commande_lignes);
+    expect(migrated.data.commandes[0]).toMatchObject({...before.data.commandes[0], archivee:0, date_archivage:null});
     const guard = new DatabaseSync(harness.path(PROTECTION_DATABASE), {readOnly: true});
     try {
       const row = guard.prepare('SELECT * FROM protections').get();
@@ -137,7 +143,7 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
     const service = new DatabaseService({sqlite: harness.api, platform: 'android'});
 
     const report = await service.initDatabase();
-    expect(report).toMatchObject({kind: 'empty-existing', version: 1});
+    expect(report).toMatchObject({kind: 'empty-existing', version: 2});
     expect(Object.values(report.counts)).toEqual([0, 0, 0, 0, 0]);
     expect(harness.events.some(e => e.name === PROTECTION_DATABASE)).toBe(false);
   });

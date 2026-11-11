@@ -10,7 +10,7 @@ import { NativeHarness, seed } from '../helpers/native-sqlite';
 const harnesses: NativeHarness[] = [];
 function setup() {
   const directory = mkdtempSync(join(tmpdir(), 'gestion-backup-restore-'));
-  seed(directory, 1);
+  seed(directory, 2);
   const harness = new NativeHarness(directory);
   harnesses.push(harness);
   const service = new DatabaseService({sqlite:harness.api,platform:'android'});
