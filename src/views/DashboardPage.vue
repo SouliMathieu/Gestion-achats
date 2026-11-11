@@ -83,6 +83,18 @@
         </ion-card-content>
       </ion-card>
 
+      <ion-card>
+        <ion-card-header><ion-card-title>Achats par fournisseur</ion-card-title><ion-card-subtitle>Commandes actives, transport inclus, devises séparées</ion-card-subtitle></ion-card-header>
+        <ion-card-content>
+          <ion-list v-if="supplierTotals.length">
+            <ion-item v-for="item in supplierTotals" :key="item.fournisseurId + '-' + item.devise">
+              <ion-label><h2>{{ item.fournisseurNom }}</h2><p>{{ item.commandes }} commande(s)</p></ion-label>
+              <ion-note slot="end">{{ Number(item.total).toFixed(2) }} {{ item.devise }}</ion-note>
+            </ion-item>
+          </ion-list>
+          <p v-else class="ion-text-center">Aucun achat enregistré</p>
+        </ion-card-content>
+      </ion-card>
       <!-- Actions rapides -->
       <ion-card>
         <ion-card-header>
@@ -98,6 +110,7 @@
               <ion-icon slot="start" :icon="cartOutline"></ion-icon>
               Nouvelle commande
             </ion-button>
+            <ion-button expand="block" fill="outline" @click="goTo('/commandes/archivees')">Commandes archivées</ion-button>
             <ion-button expand="block" fill="outline" @click="goTo('/sauvegardes')">
               <ion-icon slot="start" :icon="cloudDownloadOutline"></ion-icon>
               Sauvegarde et restauration
@@ -132,6 +145,7 @@ const stats = ref({
 });
 
 const recentCommandes = ref<any[]>([]);
+const supplierTotals = ref<any[]>([]);
 
 const loadStats = async () => {
   const statsData = await DatabaseService.getStats();
@@ -173,8 +187,7 @@ const getStatusLabel = (statut: string) => {
 };
 
 const refresh = async () => {
-  await loadStats();
-  await loadRecentCommandes();
+  await loadStats(); await loadRecentCommandes(); supplierTotals.value = await DatabaseService.getSupplierPurchaseTotals();
 };
 
 const handleRefresh = async (event: any) => {

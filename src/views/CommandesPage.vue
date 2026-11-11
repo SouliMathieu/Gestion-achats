@@ -4,6 +4,7 @@
       <ion-toolbar color="primary">
         <ion-title>Commandes</ion-title>
         <ion-buttons slot="end">
+          <ion-button fill="clear" @click="goToArchives"><ion-icon :icon="archiveOutline"></ion-icon></ion-button>
           <ion-button @click="openAddModal">
             <ion-icon :icon="addOutline"></ion-icon>
           </ion-button>
@@ -52,6 +53,7 @@
             <ion-item-option color="primary" @click="closeSliding($event); editCommande(commande)">
               <ion-icon slot="icon-only" :icon="createOutline"></ion-icon>
             </ion-item-option>
+            <ion-item-option color="tertiary" @click="closeSliding($event); archiveCommande(commande)"><ion-icon slot="icon-only" :icon="archiveOutline"></ion-icon></ion-item-option>
             <ion-item-option color="danger" @click="closeSliding($event); confirmDelete(commande)">
               <ion-icon slot="icon-only" :icon="trashOutline"></ion-icon>
             </ion-item-option>
@@ -309,7 +311,7 @@ import {
   alertController, toastController
 } from '@ionic/vue';
 import {
-  addOutline, createOutline, trashOutline, cartOutline
+  addOutline, createOutline, trashOutline, cartOutline, archiveOutline
 } from 'ionicons/icons';
 import DatabaseService from '@/services/database.service';
 import { v4 as uuidv4 } from 'uuid';
@@ -609,6 +611,11 @@ const deleteCommande = async (id: string) => {
   }
 };
 
+const goToArchives = () => router.push('/commandes/archivees');
+const archiveCommande = async (commande: any) => {
+  try { await DatabaseService.archiveCommande(commande.id); const toast = await toastController.create({message:'Commande archivée. Elle reste disponible dans les archives.',duration:2500,color:'success'}); await toast.present(); await loadCommandes(); }
+  catch (error) { const toast = await toastController.create({message:error instanceof Error?error.message:'Archivage impossible.',duration:3000,color:'danger'}); await toast.present(); }
+};
 const viewCommande = (id: string) => {
   router.push(`/commandes/${id}`);
 };

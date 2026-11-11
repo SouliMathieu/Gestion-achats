@@ -68,10 +68,14 @@
 import { IonApp, IonRouterOutlet, IonTabs, IonTabBar, IonTabButton, IonIcon, IonLabel, IonPage, IonContent, IonSpinner, IonButton } from '@ionic/vue';
 import { pieChartOutline, cubeOutline, storefrontOutline, airplaneOutline, cartOutline } from 'ionicons/icons';
 import { onMounted, ref } from 'vue';
+import { useBackButton } from '@ionic/vue';
+import { useRouter } from 'vue-router';
+import { App as CapacitorApp } from '@capacitor/app';
 import DatabaseService from '@/services/database.service';
 import { DatabaseInitializationError } from '@/services/database-initialization';
 import { backupService } from '@/services/backup.service';
 
+const router = useRouter();
 const databaseState = ref<'loading' | 'ready' | 'error'>('loading');
 const databaseError = ref('');
 const databaseDiagnostic = ref<{code: string; stage?: string; cause?: string; kind?: string; version: number | null; counts?: string} | null>(null);
@@ -79,6 +83,15 @@ const buildCommit = import.meta.env.VITE_BUILD_COMMIT || 'non renseigné';
 const databaseNeedsConfirmation = ref(false);
 const confirmingDatabase = ref(false);
 const reloadApplication = () => window.location.reload();
+useBackButton(-1, () => {
+  const overlay = document.querySelector('ion-modal.show-modal, ion-alert.show, ion-action-sheet.show, ion-popover.show, ion-picker.show, ion-loading.show');
+  if (overlay) return;
+  if (router.currentRoute.value.path !== '/dashboard') {
+    if (window.history.length > 1) router.back(); else void router.replace('/dashboard');
+    return;
+  }
+  void CapacitorApp.exitApp();
+});
 
 function describeOriginalError(value: unknown, depth = 0): string {
   if (value === null || value === undefined) return '';
