@@ -1,4 +1,4 @@
-import type { SQLiteConnection } from '@capacitor-community/sqlite';
+import type { SQLiteConnection, SQLiteDBConnection } from '@capacitor-community/sqlite';
 
 export type NativeConnections = Pick<SQLiteConnection,
   'isDatabase' | 'isConnection' | 'retrieveConnection' | 'createConnection' | 'closeConnection'>;
@@ -22,6 +22,27 @@ export async function digest(document: string): Promise<string> {
   return Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
 }
 
+async function ensureDurableWriteConfiguration(db: SQLiteDBConnection): Promise<void> {
+  // FULL doit être appliqué hors transaction : sur Android/WAL, SQLite peut démarrer en NORMAL.
+  const journal = await db.query('PRAGMA journal_mode;');
+  const journalMode = String(Object.values(journal.values?.[0] ?? {})[0] ?? '').toLowerCase();
+  if (!['delete', 'wal', 'truncate', 'persist'].includes(journalMode)) {
+    throw new Error('Configuration SQLite insuffisante : mode de journalisation non durable.');
+  }
+
+  let safety = await db.query('PRAGMA synchronous;');
+  let synchronous = Number(Object.values(safety.values?.[0] ?? {})[0]);
+  if (!Number.isFinite(synchronous) || synchronous < 2) {
+    // La configuration est propre à cette connexion. Elle doit donc être répétée à chaque ouverture.
+    await db.execute('PRAGMA synchronous = FULL;', false);
+    safety = await db.query('PRAGMA synchronous;');
+    synchronous = Number(Object.values(safety.values?.[0] ?? {})[0]);
+  }
+  if (!Number.isFinite(synchronous) || synchronous < 2) {
+    throw new Error('SQLite n’a pas confirmé le niveau de synchronisation FULL.');
+  }
+}
+
 export async function openConnection(sqlite: NativeConnections, name: string, readonly: boolean) {
   const connection = await sqlite.isConnection(name, readonly);
   if (typeof connection.result !== 'boolean') throw new Error('État de connexion indéterminé.');
@@ -30,6 +51,8 @@ export async function openConnection(sqlite: NativeConnections, name: string, re
   const opened = await db.isDBOpen();
   if (typeof opened.result !== 'boolean') throw new Error('État d’ouverture indéterminé.');
   if (!opened.result) await db.open();
+  // Toute connexion en écriture (base métier ou protection) doit être durable avant le premier write.
+  if (!readonly) await ensureDurableWriteConfiguration(db);
   return db;
 }
 

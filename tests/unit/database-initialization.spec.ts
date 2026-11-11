@@ -9,10 +9,10 @@ import { PROTECTION_DATABASE } from '../../src/services/database-migration-prote
 import { NativeHarness, DatabaseSync, rawSnapshot, seed } from '../helpers/native-sqlite';
 
 const harnesses: NativeHarness[] = [];
-function setup(version?: number) {
+function setup(version?: number, initialSynchronous?: number) {
   const directory = mkdtempSync(join(tmpdir(), 'gestion-phase1-'));
   if (version !== undefined) seed(directory, version);
-  const harness = new NativeHarness(directory);
+  const harness = new NativeHarness(directory, initialSynchronous);
   harnesses.push(harness);
   return {directory, harness, service: new DatabaseService({sqlite: harness.api, platform: 'android'})};
 }
@@ -48,6 +48,24 @@ describe('Initialisation native sur un vrai moteur SQLite, données TEST uniquem
     expect(report).toMatchObject({kind: 'new', version: 1});
     expect(Object.values(report.counts)).toEqual([0, 0, 0, 0, 0]);
     expect(Object.keys(rawSnapshot(directory).data)).toHaveLength(5);
+  });
+
+  it('force synchronous FULL avant la transaction lorsque SQLite démarre en NORMAL', async () => {
+    const {service, harness} = setup(0, 1);
+    const report = await service.initDatabase();
+    expect(report.kind).toBe('historical');
+
+    const configureIndex = harness.events.findIndex(event =>
+      event.name === DATABASE_NAME && event.method === 'execute' &&
+      event.sql?.trim().toUpperCase() === 'PRAGMA SYNCHRONOUS = FULL;');
+    const transactionIndex = harness.events.findIndex(event =>
+      event.name === DATABASE_NAME && event.method === 'begin');
+    expect(configureIndex).toBeGreaterThanOrEqual(0);
+    expect(configureIndex).toBeLessThan(transactionIndex);
+    const verified = harness.events.some(event =>
+      event.name === DATABASE_NAME && event.method === 'query' &&
+      event.sql?.trim().toUpperCase() === 'PRAGMA SYNCHRONOUS;');
+    expect(verified).toBe(true);
   });
 
   it('protège la base historique version 0, conserve chaque champ et ne modifie que sa version', async () => {

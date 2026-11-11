@@ -14,7 +14,7 @@ export class NativeHarness {
   connections = new Map<string, NativeDatabase>();
   events: Event[] = [];
   hook?: (event: Event) => void;
-  constructor(public directory: string) {}
+  constructor(public directory: string, public initialSynchronous?: number) {}
   path(name: string) { return join(this.directory, name + '.db'); }
   emit(event: Event) { this.events.push(event); this.hook?.(event); }
   api: NativeConnections = {
@@ -48,6 +48,9 @@ class NativeDatabase {
     this.event('before', 'open');
     this.handle = new DatabaseSync(this.harness.path(this.name), {readOnly: this.readonly});
     this.handle.exec('PRAGMA foreign_keys = ON;');
+    if (this.harness.initialSynchronous !== undefined) {
+      this.handle.exec(`PRAGMA synchronous = ${this.harness.initialSynchronous};`);
+    }
     this.event('after', 'open');
   }
   async close() { this.handle?.close(); this.handle = undefined; }
