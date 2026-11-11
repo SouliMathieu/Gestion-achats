@@ -33,7 +33,8 @@ describe('Sauvegardes JSON — validation et intégrité', () => {
     const service = setup();
     const doc = await service.createBackup();
     expect(doc.format).toBe(BACKUP_FORMAT);
-    expect(doc.formatVersion).toBe(1);
+    expect(doc.formatVersion).toBe(2);
+    expect(doc.schemaVersion).toBe(2);
     expect(doc.sha256).toMatch(/^[a-f0-9]{64}$/);
     const checked = await service.validateBackup(doc);
     expect(checked.report.valid).toBe(true);
