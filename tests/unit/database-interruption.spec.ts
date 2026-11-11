@@ -22,7 +22,17 @@ describe('Interruption réelle du processus pendant une migration SQLite', () =>
       const child = spawnSync(process.execPath, [script, directory, point], {encoding: 'utf8', timeout: 15000});
       expect(child.error, child.stderr).toBeUndefined();
       expect(child.signal, child.stderr).toBe('SIGKILL');
-      expect(rawSnapshot(directory)).toEqual({...before, version: point === 'after-commit' ? 2 : 0});
+      const interrupted = rawSnapshot(directory);
+      if (point === 'after-commit') {
+        expect(interrupted.version).toBe(2);
+        expect(interrupted.data.articles).toEqual(before.data.articles);
+        expect(interrupted.data.fournisseurs).toEqual(before.data.fournisseurs);
+        expect(interrupted.data.transport).toEqual(before.data.transport);
+        expect(interrupted.data.commande_lignes).toEqual(before.data.commande_lignes);
+        expect(interrupted.data.commandes[0]).toMatchObject({...before.data.commandes[0],archivee:0,date_archivage:null});
+      } else {
+        expect(interrupted).toEqual(before);
+      }
       const harness = new NativeHarness(directory);
       let priorProtections = 0;
       if ((await harness.api.isDatabase(PROTECTION_DATABASE)).result) {
