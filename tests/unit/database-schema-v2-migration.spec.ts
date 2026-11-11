@@ -9,8 +9,8 @@ import {NativeHarness,DatabaseSync,rawSnapshot,seed} from '../helpers/native-sql
 const harnesses:NativeHarness[]=[];
 afterEach(()=>{for(const h of harnesses.splice(0))h.close();});
 describe('Migration SQLite v1 vers v2 — archivage non destructif',()=>{
- it('ajoute les métadonnées d’archive sans modifier les commandes ni leurs lignes et permet archiver/restaurer',async()=>{
-  const directory=mkdtempSync(join(tmpdir(),'gestion-v2-'));seed(directory,0);const before=rawSnapshot(directory);const harness=new NativeHarness(directory);harnesses.push(harness);
+ it.each([0,1])('migre le schéma historique v%s vers v2 sans modifier les commandes ni leurs lignes et permet archiver/restaurer',async(version)=>{
+  const directory=mkdtempSync(join(tmpdir(),'gestion-v2-'));seed(directory,version);const before=rawSnapshot(directory);const harness=new NativeHarness(directory);harnesses.push(harness);
   const service=new DatabaseService({sqlite:harness.api,platform:'android'});
   const report=await service.initDatabase();expect(report.version).toBe(2);
   const after=rawSnapshot(directory);expect(after.version).toBe(2);
