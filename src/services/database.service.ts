@@ -655,7 +655,7 @@ export class DatabaseService {
   async getRecentCommandes(limit: number = 5) {
     await this.initDatabase();
     if (this.isWeb) {
-      const commandes = JSON.parse(localStorage.getItem('commandes') || '[]');
+      const commandes = JSON.parse(localStorage.getItem('commandes') || '[]').filter((c: any) => !(c.archivee === true || c.archivee === 1));
       return commandes
         .map(normalizeCommande)
         .sort((a: any, b: any) => new Date(b.dateCommande).getTime() - new Date(a.dateCommande).getTime())
@@ -663,7 +663,7 @@ export class DatabaseService {
     } else {
       if (!this.db) throw new Error('Connexion SQLite indisponible.');
       const result = await this.db.query(
-        'SELECT * FROM commandes ORDER BY date_commande DESC LIMIT ?',
+        'SELECT * FROM commandes WHERE archivee = 0 ORDER BY date_commande DESC LIMIT ?',
         [limit]
       );
       return (result.values || []).map(normalizeCommande);

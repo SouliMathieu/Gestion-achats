@@ -128,7 +128,7 @@ import { useRouter } from 'vue-router';
 import {
   IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonButtons,
   IonButton, IonIcon, IonCard, IonCardHeader, IonCardTitle, IonCardContent,
-  IonList, IonItem, IonLabel, IonBadge, IonRefresher, IonRefresherContent
+  IonList, IonItem, IonLabel, IonBadge, IonNote, IonRefresher, IonRefresherContent
 } from '@ionic/vue';
 import {
   refreshOutline, addOutline, cartOutline, cloudDownloadOutline
