@@ -15,8 +15,8 @@ function validateCommandeInput(commande:any,lignes:any[]) {
   if (!Number.isFinite(transport)||transport<0) throw new Error('Le coût du transport doit être positif ou nul.');
   for(const [i,line] of lignes.entries()){
     const q=Number(line.quantite),p=Number(line.prixUnitaire??line.prix_unitaire);
-    if(!Number.isInteger(q)||q<=0) throw new Error(\`Quantité invalide à la ligne \${i+1}.\`);
-    if(!Number.isFinite(p)||p<0) throw new Error(\`Prix invalide à la ligne \${i+1}.\`);
+    if(!Number.isInteger(q)||q<=0) throw new Error('Quantité invalide à la ligne ' + (i + 1) + '.');
+    if(!Number.isFinite(p)||p<0) throw new Error('Prix invalide à la ligne ' + (i + 1) + '.');
     if(line.devise!==commande.devise) throw new Error('Toutes les lignes doivent utiliser la même devise que la commande. Aucune conversion automatique n’est effectuée.');
   }
 }
