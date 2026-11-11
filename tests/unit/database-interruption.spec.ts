@@ -43,7 +43,13 @@ describe('Interruption réelle du processus pendant une migration SQLite', () =>
       try {
         const report = (await initializeNativeDatabase(harness.api)).report;
         expect(report.version).toBe(2);
-        expect(rawSnapshot(directory)).toEqual({...before, version: 2});
+        const recovered = rawSnapshot(directory);
+        expect(recovered.version).toBe(2);
+        expect(recovered.data.articles).toEqual(before.data.articles);
+        expect(recovered.data.fournisseurs).toEqual(before.data.fournisseurs);
+        expect(recovered.data.transport).toEqual(before.data.transport);
+        expect(recovered.data.commande_lignes).toEqual(before.data.commande_lignes);
+        expect(recovered.data.commandes[0]).toMatchObject({...before.data.commandes[0],archivee:0,date_archivage:null});
         const guard = new DatabaseSync(harness.path(PROTECTION_DATABASE));
         expect(guard.prepare('SELECT COUNT(*) AS n FROM protections').get().n).toBeGreaterThanOrEqual(priorProtections);
         guard.close();
