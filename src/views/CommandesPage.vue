@@ -301,7 +301,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
 import { onIonViewWillEnter } from '@ionic/vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 import {
   IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonButtons, IonButton,
   IonIcon, IonSegment, IonSegmentButton, IonLabel, IonList, IonListHeader,
@@ -316,7 +316,6 @@ import {
 import DatabaseService from '@/services/database.service';
 import { v4 as uuidv4 } from 'uuid';
 
-const route = useRoute();
 const router = useRouter();
 
 const commandes = ref<any[]>([]);

@@ -4,7 +4,6 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseService } from '../../src/services/database.service';
-import { DATABASE_NAME } from '../../src/services/database-initialization';
 import { NativeHarness, seed } from '../helpers/native-sqlite';
 
 const harnesses: NativeHarness[] = [];

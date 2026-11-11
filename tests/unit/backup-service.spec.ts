@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DatabaseService } from '../../src/services/database.service';
 import { TABLE_NAMES } from '../../src/services/database-schema';
 import { BackupService, BACKUP_FORMAT } from '../../src/services/backup.service';
 

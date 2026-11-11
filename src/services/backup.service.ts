@@ -40,7 +40,8 @@ async function sha256(value: string): Promise<string> {
 }
 
 function payloadOf(doc: BackupDocument): string {
-  const {sha256: _ignored, ...payload} = doc;
+  const payload = {...doc};
+  delete payload.sha256;
   return stable(payload);
 }
 
